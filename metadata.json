@@ -1,0 +1,6 @@
+{
+  "name": "ClinNote",
+  "description": "Clinical notes, PDF/OCR workspace, and Universal Smart Multilingual Text Reader with floating accessibility shortcut and medical TTS.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
