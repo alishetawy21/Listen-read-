@@ -9,8 +9,8 @@ import com.example.MainActivity
 import com.example.model.CaptureSource
 
 /**
- * Receives selected text from Android's system text-selection toolbar ("Read with ClinNote") via
- * Intent.ACTION_PROCESS_TEXT and begins reading immediately.
+ * Receives selected text from Android's system text-selection menu ("LinguaFloat: Read / Translate")
+ * via Intent.ACTION_PROCESS_TEXT and opens either the floating toolbar or full LinguaFloat workspace.
  */
 class ProcessTextActivity : Activity() {
 
@@ -29,22 +29,23 @@ class ProcessTextActivity : Activity() {
         title = previewTitle,
         rawText = selectedText,
         captureSource = CaptureSource.PROCESS_TEXT,
-        autoPlay = true,
+        autoPlay = false,
       )
 
       if (SystemIntegrationHelper.canDrawOverlays(this)) {
-        SystemIntegrationHelper.startFloatingShortcut(this)
-        Toast.makeText(this, "Reading selection with ClinNote", Toast.LENGTH_SHORT).show()
+        SystemIntegrationHelper.startFloatingShortcut(this, expandToolbar = true)
+        Toast.makeText(this, "Text loaded in LinguaFloat toolbar", Toast.LENGTH_SHORT).show()
       } else {
         val openReader =
           Intent(this, MainActivity::class.java).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
-            putExtra(MainActivity.EXTRA_OPEN_TAB, MainActivity.TAB_READER)
+            putExtra(MainActivity.EXTRA_OPEN_TAB, MainActivity.TAB_TRANSLATION)
+            putExtra(MainActivity.EXTRA_ACTION_TEXT, selectedText)
           }
         startActivity(openReader)
       }
     } else {
-      Toast.makeText(this, "No text selected to read", Toast.LENGTH_SHORT).show()
+      Toast.makeText(this, "No text selected", Toast.LENGTH_SHORT).show()
     }
 
     finish()

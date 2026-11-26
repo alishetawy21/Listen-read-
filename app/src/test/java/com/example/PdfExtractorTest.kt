@@ -5,6 +5,9 @@ import com.example.pdf.PdfDocumentProcessor
 import java.io.ByteArrayOutputStream
 import java.nio.charset.StandardCharsets
 import java.util.zip.Deflater
+import java.util.zip.ZipEntry
+import java.util.zip.ZipOutputStream
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -34,6 +37,69 @@ class PdfExtractorTest {
       "Expected extracted PDF text to contain blood pressure, got: '$extracted'",
       extracted.contains("Patient blood pressure 120/80 mmHg."),
     )
+  }
+
+  @Test
+  fun `extracts ordered bilingual chapters from EPUB OPF spine cleanly`() {
+    val baos = ByteArrayOutputStream()
+    ZipOutputStream(baos).use { zos ->
+      zos.putNextEntry(ZipEntry("META-INF/container.xml"))
+      zos.write(
+        """
+        <?xml version="1.0"?>
+        <container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+          <rootfiles>
+            <rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>
+          </rootfiles>
+        </container>
+        """
+          .trimIndent()
+          .toByteArray(StandardCharsets.UTF_8)
+      )
+      zos.closeEntry()
+
+      zos.putNextEntry(ZipEntry("OEBPS/content.opf"))
+      zos.write(
+        """
+        <?xml version="1.0" encoding="utf-8"?>
+        <package xmlns="http://www.idpf.org/2007/opf">
+          <manifest>
+            <item id="ch1" href="ch1.xhtml" media-type="application/xhtml+xml"/>
+            <item id="ch2" href="ch2.xhtml" media-type="application/xhtml+xml"/>
+          </manifest>
+          <spine>
+            <itemref idref="ch1"/>
+            <itemref idref="ch2"/>
+          </spine>
+        </package>
+        """
+          .trimIndent()
+          .toByteArray(StandardCharsets.UTF_8)
+      )
+      zos.closeEntry()
+
+      zos.putNextEntry(ZipEntry("OEBPS/ch1.xhtml"))
+      zos.write(
+        "<html><body><h1>Chapter One</h1><p>Welcome to bilingual reading.</p></body></html>"
+          .toByteArray(StandardCharsets.UTF_8)
+      )
+      zos.closeEntry()
+
+      zos.putNextEntry(ZipEntry("OEBPS/ch2.xhtml"))
+      zos.write(
+        "<html><body><p>القراءة المستمرة تصنع الطلاقة.</p></body></html>"
+          .toByteArray(StandardCharsets.UTF_8)
+      )
+      zos.closeEntry()
+    }
+
+    val processor = PdfDocumentProcessor(ApplicationProvider.getApplicationContext())
+    val result = processor.extractFromEpubBytes("Sample EPUB", baos.toByteArray())
+    assertEquals(2, result.pageCount)
+    assertTrue(result.text.contains("Chapter One"))
+    assertTrue(result.text.contains("Welcome to bilingual reading."))
+    assertTrue(result.text.contains("القراءة المستمرة تصنع الطلاقة."))
+    assertTrue(result.text.indexOf("Chapter One") < result.text.indexOf("القراءة المستمرة"))
   }
 
   private fun deflate(input: ByteArray): ByteArray {

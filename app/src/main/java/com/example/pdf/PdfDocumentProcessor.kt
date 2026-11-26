@@ -2,17 +2,22 @@ package com.example.pdf
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.pdf.PdfRenderer
 import android.net.Uri
 import android.provider.OpenableColumns
+import com.example.ai.AiCallResult
+import com.example.ai.LinguaAiService
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
+import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.nio.charset.StandardCharsets
 import java.util.zip.Inflater
+import java.util.zip.ZipInputStream
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlinx.coroutines.Dispatchers
@@ -25,9 +30,13 @@ data class ExtractedDocumentResult(
   val pageCount: Int,
   val usedOcr: Boolean,
   val ocrPagesCount: Int = 0,
+  val usedCloudVisionOcr: Boolean = false,
 )
 
-class PdfDocumentProcessor(private val context: Context) {
+class PdfDocumentProcessor(
+  private val context: Context,
+  private val aiService: LinguaAiService? = null,
+) {
 
   private val textRecognizer by lazy {
     TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
@@ -46,7 +55,10 @@ class PdfDocumentProcessor(private val context: Context) {
     return uri.lastPathSegment?.substringAfterLast('/') ?: "Imported Document"
   }
 
-  suspend fun extractFromPdfUri(uri: Uri): ExtractedDocumentResult =
+  suspend fun extractFromPdfUri(
+    uri: Uri,
+    allowCloudArabicOcr: Boolean = true,
+  ): ExtractedDocumentResult =
     withContext(Dispatchers.IO) {
       val fileName = queryDisplayName(uri).removeSuffix(".pdf").removeSuffix(".PDF")
       val rawBytes =
@@ -57,25 +69,40 @@ class PdfDocumentProcessor(private val context: Context) {
       var pageCount = 1
       val ocrPages = mutableListOf<String>()
       var ocrPagesCount = 0
+      var usedCloudVision = false
 
-      // Open PdfRenderer to get accurate page count and OCR scanned pages if embedded text is sparse
       context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
         PdfRenderer(pfd).use { renderer ->
           pageCount = renderer.pageCount.coerceAtLeast(1)
           val needsOcr = embeddedText.isBlank() || embeddedText.length < pageCount * 40
           if (needsOcr) {
-            val maxPagesToOcr = pageCount.coerceAtMost(20)
+            val maxPagesToOcr = pageCount.coerceAtMost(15)
             for (pageIndex in 0 until maxPagesToOcr) {
               renderer.openPage(pageIndex).use { page ->
                 val scale = 2f
-                val width = (page.width * scale).toInt().coerceIn(400, 2200)
-                val height = (page.height * scale).toInt().coerceIn(400, 3000)
+                val width = (page.width * scale).toInt().coerceIn(400, 1800)
+                val height = (page.height * scale).toInt().coerceIn(400, 2500)
                 val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
                 Canvas(bitmap).drawColor(Color.WHITE)
                 page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
                 try {
-                  val pageText = recognizeBitmapText(bitmap).trim()
-                  if (pageText.isNotEmpty()) {
+                  val mlKitText = runCatching { recognizeBitmapText(bitmap).trim() }.getOrDefault("")
+                  val pageText =
+                    if (mlKitText.length >= 25) {
+                      mlKitText
+                    } else if (allowCloudArabicOcr && aiService != null) {
+                      when (val vision = aiService.extractArabicAndEnglishOcr(bitmap)) {
+                        is AiCallResult.Success -> {
+                          usedCloudVision = true
+                          vision.data
+                        }
+                        is AiCallResult.Error -> mlKitText
+                      }
+                    } else {
+                      mlKitText
+                    }
+
+                  if (pageText.isNotBlank()) {
                     ocrPages.add(pageText)
                     ocrPagesCount++
                   }
@@ -103,20 +130,138 @@ class PdfDocumentProcessor(private val context: Context) {
         pageCount = pageCount,
         usedOcr = useOcrResult && ocrPagesCount > 0,
         ocrPagesCount = ocrPagesCount,
+        usedCloudVisionOcr = usedCloudVision,
       )
     }
 
-  suspend fun extractFromImageUri(uri: Uri): ExtractedDocumentResult =
+  suspend fun extractFromEpubUri(uri: Uri): ExtractedDocumentResult =
+    withContext(Dispatchers.IO) {
+      val name = queryDisplayName(uri).removeSuffix(".epub").removeSuffix(".EPUB")
+      val bytes =
+        context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+          ?: throw IllegalStateException("Unable to read EPUB file")
+      extractFromEpubBytes(name, bytes)
+    }
+
+  internal fun extractFromEpubBytes(title: String, epubBytes: ByteArray): ExtractedDocumentResult {
+    val entries = mutableMapOf<String, ByteArray>()
+    ZipInputStream(ByteArrayInputStream(epubBytes)).use { zis ->
+      var entry = zis.nextEntry
+      while (entry != null) {
+        if (!entry.isDirectory) {
+          entries[entry.name] = zis.readBytes()
+        }
+        zis.closeEntry()
+        entry = zis.nextEntry
+      }
+    }
+
+    // Find OPF path from META-INF/container.xml
+    val containerXml = entries["META-INF/container.xml"]?.toString(StandardCharsets.UTF_8).orEmpty()
+    val opfPath =
+      Regex("""full-path=["']([^"']+)["']""").find(containerXml)?.groupValues?.getOrNull(1)
+    val opfDir = opfPath?.substringBeforeLast('/', "")?.let { if (it.isNotEmpty()) "$it/" else "" }.orEmpty()
+    val opfXml = opfPath?.let { entries[it]?.toString(StandardCharsets.UTF_8) }.orEmpty()
+
+    val orderedFiles = mutableListOf<String>()
+    if (opfXml.isNotBlank()) {
+      val manifestMap = mutableMapOf<String, String>()
+      val itemRegex = Regex("""<item\s+[^>]*id=["']([^"']+)["'][^>]*href=["']([^"']+)["']""", RegexOption.IGNORE_CASE)
+      val itemRegexAlt = Regex("""<item\s+[^>]*href=["']([^"']+)["'][^>]*id=["']([^"']+)["']""", RegexOption.IGNORE_CASE)
+      for (m in itemRegex.findAll(opfXml)) {
+        manifestMap[m.groupValues[1]] = m.groupValues[2]
+      }
+      for (m in itemRegexAlt.findAll(opfXml)) {
+        manifestMap[m.groupValues[2]] = m.groupValues[1]
+      }
+      val spineRegex = Regex("""<itemref\s+[^>]*idref=["']([^"']+)["']""", RegexOption.IGNORE_CASE)
+      for (m in spineRegex.findAll(opfXml)) {
+        val href = manifestMap[m.groupValues[1]] ?: continue
+        val resolved = "$opfDir$href".removePrefix("/")
+        if (entries.containsKey(resolved)) orderedFiles.add(resolved)
+      }
+    }
+
+    if (orderedFiles.isEmpty()) {
+      orderedFiles.addAll(
+        entries.keys
+          .filter { it.endsWith(".xhtml", true) || it.endsWith(".html", true) || it.endsWith(".htm", true) }
+          .sorted()
+      )
+    }
+
+    val chapterTexts =
+      orderedFiles.mapNotNull { path ->
+        val html = entries[path]?.toString(StandardCharsets.UTF_8) ?: return@mapNotNull null
+        val cleaned = stripHtmlToParagraphs(html)
+        cleaned.takeIf { it.isNotBlank() }
+      }
+
+    return ExtractedDocumentResult(
+      title = title,
+      text = chapterTexts.joinToString("\n\n"),
+      pageCount = orderedFiles.size.coerceAtLeast(1),
+      usedOcr = false,
+    )
+  }
+
+  private fun stripHtmlToParagraphs(html: String): String {
+    return html
+      .replace(Regex("<head[^>]*>.*?</head>", setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE)), "")
+      .replace(Regex("<script[^>]*>.*?</script>", setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE)), "")
+      .replace(Regex("<style[^>]*>.*?</style>", setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE)), "")
+      .replace(Regex("</(p|div|h1|h2|h3|h4|h5|h6|li|br|tr)[^>]*>", RegexOption.IGNORE_CASE), "\n\n")
+      .replace(Regex("<br\\s*/?>", RegexOption.IGNORE_CASE), "\n")
+      .replace(Regex("<[^>]+>"), " ")
+      .replace("&nbsp;", " ")
+      .replace("&amp;", "&")
+      .replace("&lt;", "<")
+      .replace("&gt;", ">")
+      .replace("&quot;", "\"")
+      .replace("&#39;", "'")
+      .replace(Regex("[ \\t]+"), " ")
+      .replace(Regex("\\n[ \\t]+"), "\n")
+      .replace(Regex("\\n{3,}"), "\n\n")
+      .trim()
+  }
+
+  suspend fun extractFromImageUri(
+    uri: Uri,
+    allowCloudArabicOcr: Boolean = true,
+  ): ExtractedDocumentResult =
     withContext(Dispatchers.IO) {
       val name = queryDisplayName(uri)
       val image = InputImage.fromFilePath(context, uri)
-      val extracted = recognizeInputImage(image).trim()
+      val mlKitText = runCatching { recognizeInputImage(image).trim() }.getOrDefault("")
+      var usedCloud = false
+      val finalText =
+        if (mlKitText.length >= 25) {
+          mlKitText
+        } else if (allowCloudArabicOcr && aiService != null) {
+          val bmp =
+            context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it) }
+          if (bmp != null) {
+            try {
+              when (val res = aiService.extractArabicAndEnglishOcr(bmp)) {
+                is AiCallResult.Success -> {
+                  usedCloud = true
+                  res.data
+                }
+                is AiCallResult.Error -> mlKitText
+              }
+            } finally {
+              bmp.recycle()
+            }
+          } else mlKitText
+        } else mlKitText
+
       ExtractedDocumentResult(
         title = "Scan: $name",
-        text = extracted,
+        text = finalText,
         pageCount = 1,
         usedOcr = true,
         ocrPagesCount = 1,
+        usedCloudVisionOcr = usedCloud,
       )
     }
 
@@ -152,17 +297,10 @@ class PdfDocumentProcessor(private val context: Context) {
         .addOnFailureListener { exc -> cont.resumeWithException(exc) }
     }
 
-  /**
-   * Lightweight, dependency-free PDF content stream extractor supporting uncompressed &
-   * FlateDecode streams, literal strings `(...) Tj`, array strings `[...] TJ`, and UTF-16BE hex
-   * strings `<FEFF...>`. Falls back to ML Kit OCR when a PDF is scanned/image-only.
-   */
   internal fun extractEmbeddedPdfText(pdfBytes: ByteArray): String {
     val latin = String(pdfBytes, StandardCharsets.ISO_8859_1)
     val streamRegex = Regex("""stream\r?\n(.*?)\r?\n?endstream""", setOf(RegexOption.DOT_MATCHES_ALL))
     val extractedBlocks = mutableListOf<String>()
-
-    // Also inspect any ToUnicode hex map entries if present
     val cmap = parseSimpleToUnicodeCMap(latin)
 
     for (match in streamRegex.findAll(latin)) {

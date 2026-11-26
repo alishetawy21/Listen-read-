@@ -31,6 +31,7 @@ interface SpeechProvider {
     preferredVoiceId: String?,
     speed: Float,
     pitch: Float,
+    volume: Float = 1.0f,
     pauseAfterMs: Long = 0L,
   ): Boolean
 

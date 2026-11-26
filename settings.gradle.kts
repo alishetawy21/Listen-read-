@@ -22,6 +22,6 @@ dependencyResolutionManagement {
   }
 }
 
-rootProject.name = "ClinNote"
+rootProject.name = "LinguaFloat"
 
 include(":app")

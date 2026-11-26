@@ -9,6 +9,24 @@ enum class VoiceQualityTier(val label: String) {
   CLOUD_BACKEND("Cloud Backend Adapter"),
 }
 
+enum class VoiceGender(val label: String) {
+  ANY("All"),
+  FEMALE("Female"),
+  MALE("Male"),
+}
+
+enum class TranslationTone(val label: String) {
+  NATURAL("Natural"),
+  ACADEMIC("Academic"),
+  MEDICAL("Medical"),
+  CONVERSATIONAL("Conversational"),
+}
+
+enum class ListenAudioMode(val label: String) {
+  ORIGINAL("Original"),
+  TRANSLATED("Translated"),
+}
+
 enum class PlaybackStatus {
   IDLE,
   PREPARING,
@@ -18,9 +36,10 @@ enum class PlaybackStatus {
 }
 
 enum class CaptureSource(val displayName: String) {
-  INTERNAL_NOTE("ClinNote Note"),
+  INTERNAL_NOTE("Library Document"),
   PDF_TEXT("Digital PDF"),
   PDF_OCR("Scanned PDF (OCR)"),
+  EPUB_BOOK("EPUB Book"),
   IMAGE_OCR("Image Scan (OCR)"),
   PROCESS_TEXT("Text Selection Menu"),
   SHARE_INTENT("Shared Text"),
@@ -78,6 +97,7 @@ data class VoiceInfoModel(
   val languageCode: String,
   val qualityTier: VoiceQualityTier,
   val isOfflineAvailable: Boolean,
+  val gender: VoiceGender = VoiceGender.ANY,
   val isFavorite: Boolean = false,
   val providerId: String = "android_tts",
 )
@@ -100,6 +120,55 @@ data class ReaderSentence(
   val segments: List<SpeechSegment>,
 )
 
+data class VocabularyBreakdownItem(
+  val term: String,
+  val pronunciationGuide: String,
+  val meaning: String,
+  val usageExample: String,
+)
+
+data class TranslationResult(
+  val sourceText: String,
+  val detectedSourceLanguage: String,
+  val targetLanguage: String,
+  val translatedText: String,
+  val literalVsContextualNote: String,
+  val toneAndRegister: String,
+  val alternativeTranslations: List<String>,
+  val vocabularyBreakdown: List<VocabularyBreakdownItem>,
+)
+
+data class WordAssessment(
+  val word: String,
+  val status: String, // "accurate", "needs_polish", "missing_or_substituted"
+  val phoneticTip: String,
+)
+
+data class PronunciationEvaluation(
+  val targetSentence: String,
+  val recognizedTranscript: String,
+  val estimatedOverallScore: Int,
+  val verifiedWordAccuracyPct: Int,
+  val measuredWpm: Int,
+  val audioAnalyzed: Boolean,
+  val verifiedMetricsSummary: String,
+  val clarityAndArticulationNote: String,
+  val rhythmAndStressNote: String,
+  val l1InterferenceTips: String,
+  val practiceDrillTip: String,
+  val wordAssessments: List<WordAssessment>,
+)
+
+data class FreeSpeakResult(
+  val userTranscript: String,
+  val conversationalReply: String,
+  val replyTranslation: String,
+  val grammarAndFluencyFeedback: String,
+  val pronunciationAndAccentTips: String,
+  val improvedNaturalVersion: String,
+  val audioAnalyzed: Boolean,
+)
+
 data class ReaderSessionState(
   val documentId: Long? = null,
   val title: String = "No Document Loaded",
@@ -116,10 +185,12 @@ data class ReaderSessionState(
   val activeQualityTier: VoiceQualityTier = VoiceQualityTier.ON_DEVICE_BASIC,
   val speechSpeed: Float = 1.0f,
   val speechPitch: Float = 1.0f,
+  val speechVolume: Float = 1.0f,
   val skipHeadingsAndRefs: Boolean = false,
   val repeatCurrentSentence: Boolean = false,
   val isRtlDocument: Boolean = false,
   val availableVoices: List<VoiceInfoModel> = emptyList(),
+  val listenAudioMode: ListenAudioMode = ListenAudioMode.ORIGINAL,
   val statusMessage: String? = null,
   val errorMessage: String? = null,
 ) {
@@ -137,16 +208,23 @@ data class ReaderSettings(
   val mixArabicEnglishSwitching: Boolean = true,
   val preferredVoicesByLang: Map<String, String> = emptyMap(),
   val favoriteVoiceIds: Set<String> = emptySet(),
+  val preferredGender: String = "ANY",
+  val englishAccentTag: String = "en-US",
+  val preferredTargetTranslationLang: String = "ar",
+  val preferredTranslationTone: String = "NATURAL",
   val speechSpeed: Float = 1.0f,
   val speechPitch: Float = 1.0f,
+  val speechVolume: Float = 1.0f,
   val skipHeadingsAndReferences: Boolean = false,
   val floatingShortcutEnabled: Boolean = false,
   val floatingButtonSizeDp: Float = 56f,
-  val floatingButtonAlpha: Float = 0.90f,
+  val floatingButtonAlpha: Float = 0.92f,
   val floatingButtonX: Int = 24,
-  val floatingButtonY: Int = 360,
+  val floatingButtonY: Int = 340,
   val doubleTapToTogglePlay: Boolean = true,
   val readingHistoryEnabled: Boolean = true,
+  val saveVoiceRecordingsConsent: Boolean = false,
+  val onlineAiEnabled: Boolean = true,
   val cloudTtsEnabled: Boolean = false,
   val cloudTtsEndpointUrl: String = "",
 )

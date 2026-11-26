@@ -13,8 +13,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
 /**
- * Receives shared text, PDFs, or document images via Android Share Sheet (ACTION_SEND) so users
- * can send content from any app — including apps that block direct text selection.
+ * Receives shared text, PDFs, EPUBs, or document images via Android Share Sheet (ACTION_SEND)
+ * so users can open content from any app — including apps that block direct text selection.
  */
 class ShareReceiverActivity : ComponentActivity() {
 
@@ -40,6 +40,33 @@ class ShareReceiverActivity : ComponentActivity() {
           )
           launchMainReader()
         }
+        (mimeType == "application/epub+zip" || streamUri?.toString()?.endsWith(".epub", true) == true) &&
+          streamUri != null -> {
+          CoroutineScope(Dispatchers.IO).launch {
+            val extracted = runCatching { app.pdfProcessor.extractFromEpubUri(streamUri) }.getOrNull()
+            if (extracted != null && extracted.text.isNotBlank()) {
+              val savedId =
+                app.repository.saveNote(
+                  title = extracted.title,
+                  content = extracted.text,
+                  category = "EPUB Book",
+                  sourceType = CaptureSource.EPUB_BOOK,
+                  pageCount = extracted.pageCount,
+                  isOcrExtracted = false,
+                )
+              app.speechCoordinator.loadText(
+                title = extracted.title,
+                rawText = extracted.text,
+                captureSource = CaptureSource.EPUB_BOOK,
+                documentId = savedId,
+                autoPlay = true,
+              )
+            } else {
+              app.speechCoordinator.notifyCaptureFeedback("Unable to extract chapters from shared EPUB.")
+            }
+            launchMainReader()
+          }
+        }
         mimeType == "application/pdf" && streamUri != null -> {
           CoroutineScope(Dispatchers.IO).launch {
             val extracted = runCatching { app.pdfProcessor.extractFromPdfUri(streamUri) }.getOrNull()
@@ -63,9 +90,7 @@ class ShareReceiverActivity : ComponentActivity() {
                 autoPlay = true,
               )
             } else {
-              app.speechCoordinator.notifyCaptureFeedback(
-                "Unable to extract text from shared PDF."
-              )
+              app.speechCoordinator.notifyCaptureFeedback("Unable to extract text from shared PDF.")
             }
             launchMainReader()
           }

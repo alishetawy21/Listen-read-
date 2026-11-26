@@ -21,11 +21,13 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.MenuBook
 import androidx.compose.material.icons.automirrored.rounded.MenuBook
-import androidx.compose.material.icons.outlined.FolderCopy
-import androidx.compose.material.icons.outlined.GraphicEq
+import androidx.compose.material.icons.outlined.Home
+import androidx.compose.material.icons.outlined.Mic
+import androidx.compose.material.icons.outlined.Translate
 import androidx.compose.material.icons.outlined.Tune
-import androidx.compose.material.icons.rounded.FolderCopy
-import androidx.compose.material.icons.rounded.GraphicEq
+import androidx.compose.material.icons.rounded.Home
+import androidx.compose.material.icons.rounded.Mic
+import androidx.compose.material.icons.rounded.Translate
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -42,6 +44,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -51,41 +54,59 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import com.example.ai.configureAppCheck
 import com.example.capture.SystemIntegrationHelper
+import com.example.model.VoiceGender
+import com.example.nlp.LanguageDetector
 import com.example.ui.ClinNoteViewModel
 import com.example.ui.components.MiniPlayerBar
+import com.example.ui.navigation.CoachRoute
+import com.example.ui.navigation.FloatingSettingsRoute
+import com.example.ui.navigation.HomeRoute
 import com.example.ui.navigation.LibraryRoute
+import com.example.ui.navigation.PracticeRoute
+import com.example.ui.navigation.ProgressRoute
 import com.example.ui.navigation.ReaderRoute
 import com.example.ui.navigation.SettingsRoute
 import com.example.ui.navigation.StudioRoute
+import com.example.ui.navigation.TranslationRoute
+import com.example.ui.navigation.VocabularyRoute
+import com.example.ui.screens.CoachScreen
+import com.example.ui.screens.FloatingSettingsScreen
+import com.example.ui.screens.HomeScreen
 import com.example.ui.screens.LibraryScreen
+import com.example.ui.screens.PracticeScreen
+import com.example.ui.screens.ProgressScreen
 import com.example.ui.screens.ReaderScreen
 import com.example.ui.screens.SettingsScreen
 import com.example.ui.screens.StudioScreen
-import com.example.ui.theme.ClinNoteTheme
+import com.example.ui.screens.TranslationScreen
+import com.example.ui.screens.VocabularyScreen
+import com.example.ui.theme.LinguaFloatTheme
 
 class MainActivity : ComponentActivity() {
 
   private var pendingTab by mutableStateOf<String?>(null)
+  private var pendingActionText by mutableStateOf<String?>(null)
 
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
+    configureAppCheck(this, intent)
     enableEdgeToEdge()
     pendingTab = intent?.getStringExtra(EXTRA_OPEN_TAB)
-
-    val app = application as ClinNoteApplication
-    if (SystemIntegrationHelper.canDrawOverlays(this)) {
-      // Restore floating shortcut if user left it enabled
-      // Checked safely in background via viewmodel/settings
-    }
+    pendingActionText = intent?.getStringExtra(EXTRA_ACTION_TEXT)
 
     setContent {
-      ClinNoteTheme {
+      LinguaFloatTheme {
         val vm: ClinNoteViewModel = viewModel()
-        ClinNoteRootScreen(
+        LinguaFloatRootScreen(
           viewModel = vm,
           pendingTab = pendingTab,
-          onPendingTabConsumed = { pendingTab = null },
+          pendingActionText = pendingActionText,
+          onPendingActionConsumed = {
+            pendingTab = null
+            pendingActionText = null
+          },
         )
       }
     }
@@ -95,71 +116,111 @@ class MainActivity : ComponentActivity() {
     super.onNewIntent(intent)
     setIntent(intent)
     pendingTab = intent.getStringExtra(EXTRA_OPEN_TAB)
+    pendingActionText = intent.getStringExtra(EXTRA_ACTION_TEXT)
   }
 
   companion object {
     const val EXTRA_OPEN_TAB = "extra_open_tab"
+    const val EXTRA_ACTION_TEXT = "extra_action_text"
+    const val TAB_HOME = "home"
     const val TAB_LIBRARY = "library"
     const val TAB_READER = "reader"
+    const val TAB_TRANSLATION = "translation"
+    const val TAB_COACH = "coach"
+    const val TAB_PRACTICE = "practice"
+    const val TAB_VOCABULARY = "vocabulary"
+    const val TAB_PROGRESS = "progress"
+    const val TAB_FLOATING_SETTINGS = "floating_settings"
     const val TAB_STUDIO = "studio"
     const val TAB_SETTINGS = "settings"
   }
 }
 
 @Composable
-fun ClinNoteRootScreen(
+fun LinguaFloatRootScreen(
   viewModel: ClinNoteViewModel,
   pendingTab: String?,
-  onPendingTabConsumed: () -> Unit,
+  pendingActionText: String?,
+  onPendingActionConsumed: () -> Unit,
 ) {
   val navController = rememberNavController()
   val navBackStackEntry by navController.currentBackStackEntryAsState()
   val currentDestination = navBackStackEntry?.destination
 
   val sessionState by viewModel.sessionState.collectAsStateWithLifecycle()
+  val captureState by viewModel.captureState.collectAsStateWithLifecycle()
   val settings by viewModel.settings.collectAsStateWithLifecycle()
   val notes by viewModel.notes.collectAsStateWithLifecycle()
   val rules by viewModel.pronunciationRules.collectAsStateWithLifecycle()
   val bookmarks by viewModel.bookmarks.collectAsStateWithLifecycle()
   val history by viewModel.history.collectAsStateWithLifecycle()
+  val translations by viewModel.translationHistory.collectAsStateWithLifecycle()
+  val savedPhrases by viewModel.savedPhrases.collectAsStateWithLifecycle()
+  val attempts by viewModel.pronunciationAttempts.collectAsStateWithLifecycle()
   val isImporting by viewModel.isImporting.collectAsStateWithLifecycle()
   val importBanner by viewModel.importBanner.collectAsStateWithLifecycle()
 
-  val context = androidx.compose.ui.platform.LocalContext.current
+  val translationInput by viewModel.translationInput.collectAsStateWithLifecycle()
+  val translationSourceLang by viewModel.translationSourceLang.collectAsStateWithLifecycle()
+  val translationTargetLang by viewModel.translationTargetLang.collectAsStateWithLifecycle()
+  val translationTone by viewModel.translationTone.collectAsStateWithLifecycle()
+  val translationUiState by viewModel.translationUiState.collectAsStateWithLifecycle()
+  val inlineSheetState by viewModel.inlineSheetState.collectAsStateWithLifecycle()
+
+  val coachTargetSentence by viewModel.coachTargetSentence.collectAsStateWithLifecycle()
+  val coachTargetLang by viewModel.coachTargetLang.collectAsStateWithLifecycle()
+  val coachUiState by viewModel.coachUiState.collectAsStateWithLifecycle()
+  val freeSpeakTranscript by viewModel.freeSpeakTranscript.collectAsStateWithLifecycle()
+  val freeSpeakUiState by viewModel.freeSpeakUiState.collectAsStateWithLifecycle()
+
+  val context = LocalContext.current
   LaunchedEffect(settings.floatingShortcutEnabled) {
     if (settings.floatingShortcutEnabled && SystemIntegrationHelper.canDrawOverlays(context)) {
       SystemIntegrationHelper.startFloatingShortcut(context)
     }
   }
 
-  LaunchedEffect(pendingTab) {
-    when (pendingTab) {
-      MainActivity.TAB_READER -> {
-        navController.navigate(ReaderRoute) { launchSingleTop = true }
-        onPendingTabConsumed()
-      }
-      MainActivity.TAB_SETTINGS -> {
-        navController.navigate(SettingsRoute) { launchSingleTop = true }
-        onPendingTabConsumed()
-      }
-      MainActivity.TAB_STUDIO -> {
-        navController.navigate(StudioRoute) { launchSingleTop = true }
-        onPendingTabConsumed()
-      }
-      MainActivity.TAB_LIBRARY -> {
-        navController.navigate(LibraryRoute) { launchSingleTop = true }
-        onPendingTabConsumed()
+  LaunchedEffect(pendingTab, pendingActionText) {
+    val tab = pendingTab ?: return@LaunchedEffect
+    if (!pendingActionText.isNullOrBlank()) {
+      when (tab) {
+        MainActivity.TAB_COACH -> {
+          viewModel.setCoachTarget(pendingActionText, LanguageDetector.detectLanguage(pendingActionText))
+        }
+        MainActivity.TAB_TRANSLATION -> {
+          viewModel.updateTranslationInput(pendingActionText)
+          viewModel.runTranslation(pendingActionText)
+        }
       }
     }
+    val route: Any =
+      when (tab) {
+        MainActivity.TAB_LIBRARY -> LibraryRoute
+        MainActivity.TAB_READER -> ReaderRoute
+        MainActivity.TAB_TRANSLATION -> TranslationRoute
+        MainActivity.TAB_COACH -> CoachRoute
+        MainActivity.TAB_PRACTICE -> PracticeRoute
+        MainActivity.TAB_VOCABULARY -> VocabularyRoute
+        MainActivity.TAB_PROGRESS -> ProgressRoute
+        MainActivity.TAB_FLOATING_SETTINGS -> FloatingSettingsRoute
+        MainActivity.TAB_STUDIO -> StudioRoute
+        MainActivity.TAB_SETTINGS -> SettingsRoute
+        else -> HomeRoute
+      }
+    navController.navigate(route) { launchSingleTop = true }
+    onPendingActionConsumed()
   }
 
-  val navigateToTab: (Any) -> Unit = { route ->
+  val navigateToTopTab: (Any) -> Unit = { route ->
     navController.navigate(route) {
-      popUpTo(LibraryRoute) { saveState = true }
+      popUpTo(HomeRoute) { saveState = true }
       launchSingleTop = true
       restoreState = true
     }
   }
+
+  val preferredGender =
+    runCatching { VoiceGender.valueOf(settings.preferredGender) }.getOrDefault(VoiceGender.ANY)
 
   BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
     val useNavRail = maxWidth >= 700.dp
@@ -170,8 +231,7 @@ fun ClinNoteRootScreen(
       bottomBar = {
         if (!useNavRail) {
           Column(
-            modifier =
-              Modifier.fillMaxWidth().windowInsetsPadding(WindowInsets.navigationBars)
+            modifier = Modifier.fillMaxWidth().windowInsetsPadding(WindowInsets.navigationBars)
           ) {
             MiniPlayerBar(
               state = sessionState,
@@ -181,62 +241,82 @@ fun ClinNoteRootScreen(
               onNext = { viewModel.speechCoordinator.nextSentence() },
               onRepeatToggle = { viewModel.speechCoordinator.toggleRepeatCurrentSentence() },
               onSelectSpeed = { viewModel.speechCoordinator.setSpeed(it) },
+              onSelectVolume = { viewModel.speechCoordinator.setVolume(it) },
               onSelectLanguage = { viewModel.speechCoordinator.selectLanguageOverride(it) },
               onBookmark = { viewModel.speechCoordinator.bookmarkCurrentPosition() },
-              onOpenReader = { navigateToTab(ReaderRoute) },
+              onTranslateCurrent = {
+                val sentence = sessionState.currentSentence
+                if (sentence != null) {
+                  viewModel.openSentenceAssistSheet(sentence.rawText, sentence.detectedLanguageTag)
+                  navigateToTopTab(ReaderRoute)
+                }
+              },
+              onOpenReader = { navigateToTopTab(ReaderRoute) },
             )
             NavigationBar {
               NavigationBarItem(
-                selected = currentDestination?.hasRoute<LibraryRoute>() == true,
-                onClick = { navigateToTab(LibraryRoute) },
+                selected = currentDestination?.hasRoute<HomeRoute>() == true,
+                onClick = { navigateToTopTab(HomeRoute) },
                 icon = {
                   Icon(
-                    if (currentDestination?.hasRoute<LibraryRoute>() == true)
-                      Icons.Rounded.FolderCopy
-                    else Icons.Outlined.FolderCopy,
-                    contentDescription = "Notes & PDFs",
+                    if (currentDestination?.hasRoute<HomeRoute>() == true) Icons.Rounded.Home
+                    else Icons.Outlined.Home,
+                    contentDescription = "Home Dashboard",
                   )
                 },
-                label = { Text("Notes") },
-                modifier = Modifier.testTag("nav_library"),
+                label = { Text("Home") },
+                modifier = Modifier.testTag("nav_home"),
               )
               NavigationBarItem(
-                selected = currentDestination?.hasRoute<ReaderRoute>() == true,
-                onClick = { navigateToTab(ReaderRoute) },
+                selected =
+                  currentDestination?.hasRoute<ReaderRoute>() == true ||
+                    currentDestination?.hasRoute<LibraryRoute>() == true,
+                onClick = { navigateToTopTab(ReaderRoute) },
                 icon = {
                   Icon(
                     if (currentDestination?.hasRoute<ReaderRoute>() == true)
                       Icons.AutoMirrored.Rounded.MenuBook
                     else Icons.AutoMirrored.Outlined.MenuBook,
-                    contentDescription = "Smart Reader",
+                    contentDescription = "Book & PDF Reader",
                   )
                 },
                 label = { Text("Reader") },
                 modifier = Modifier.testTag("nav_reader"),
               )
               NavigationBarItem(
-                selected = currentDestination?.hasRoute<StudioRoute>() == true,
-                onClick = { navigateToTab(StudioRoute) },
+                selected = currentDestination?.hasRoute<TranslationRoute>() == true,
+                onClick = { navigateToTopTab(TranslationRoute) },
                 icon = {
                   Icon(
-                    if (currentDestination?.hasRoute<StudioRoute>() == true)
-                      Icons.Rounded.GraphicEq
-                    else Icons.Outlined.GraphicEq,
-                    contentDescription = "Voices & Dictionary",
+                    if (currentDestination?.hasRoute<TranslationRoute>() == true) Icons.Rounded.Translate
+                    else Icons.Outlined.Translate,
+                    contentDescription = "Translation Workspace",
                   )
                 },
-                label = { Text("Voices") },
-                modifier = Modifier.testTag("nav_studio"),
+                label = { Text("Translate") },
+                modifier = Modifier.testTag("nav_translate"),
+              )
+              NavigationBarItem(
+                selected = currentDestination?.hasRoute<CoachRoute>() == true,
+                onClick = { navigateToTopTab(CoachRoute) },
+                icon = {
+                  Icon(
+                    if (currentDestination?.hasRoute<CoachRoute>() == true) Icons.Rounded.Mic
+                    else Icons.Outlined.Mic,
+                    contentDescription = "Pronunciation Coach",
+                  )
+                },
+                label = { Text("Coach") },
+                modifier = Modifier.testTag("nav_coach"),
               )
               NavigationBarItem(
                 selected = currentDestination?.hasRoute<SettingsRoute>() == true,
-                onClick = { navigateToTab(SettingsRoute) },
+                onClick = { navigateToTopTab(SettingsRoute) },
                 icon = {
                   Icon(
-                    if (currentDestination?.hasRoute<SettingsRoute>() == true)
-                      Icons.Rounded.Tune
+                    if (currentDestination?.hasRoute<SettingsRoute>() == true) Icons.Rounded.Tune
                     else Icons.Outlined.Tune,
-                    contentDescription = "Reader Settings",
+                    contentDescription = "Settings & Preferences",
                   )
                 },
                 label = { Text("Settings") },
@@ -251,74 +331,241 @@ fun ClinNoteRootScreen(
         if (useNavRail) {
           NavigationRail(modifier = Modifier.fillMaxHeight()) {
             NavigationRailItem(
-              selected = currentDestination?.hasRoute<LibraryRoute>() == true,
-              onClick = { navigateToTab(LibraryRoute) },
-              icon = { Icon(Icons.Rounded.FolderCopy, contentDescription = "Notes") },
-              label = { Text("Notes") },
+              selected = currentDestination?.hasRoute<HomeRoute>() == true,
+              onClick = { navigateToTopTab(HomeRoute) },
+              icon = { Icon(Icons.Rounded.Home, contentDescription = "Home") },
+              label = { Text("Home") },
             )
             NavigationRailItem(
               selected = currentDestination?.hasRoute<ReaderRoute>() == true,
-              onClick = { navigateToTab(ReaderRoute) },
+              onClick = { navigateToTopTab(ReaderRoute) },
               icon = { Icon(Icons.AutoMirrored.Rounded.MenuBook, contentDescription = "Reader") },
               label = { Text("Reader") },
             )
             NavigationRailItem(
-              selected = currentDestination?.hasRoute<StudioRoute>() == true,
-              onClick = { navigateToTab(StudioRoute) },
-              icon = { Icon(Icons.Rounded.GraphicEq, contentDescription = "Voices") },
-              label = { Text("Voices") },
+              selected = currentDestination?.hasRoute<TranslationRoute>() == true,
+              onClick = { navigateToTopTab(TranslationRoute) },
+              icon = { Icon(Icons.Rounded.Translate, contentDescription = "Translate") },
+              label = { Text("Translate") },
+            )
+            NavigationRailItem(
+              selected = currentDestination?.hasRoute<CoachRoute>() == true,
+              onClick = { navigateToTopTab(CoachRoute) },
+              icon = { Icon(Icons.Rounded.Mic, contentDescription = "Coach") },
+              label = { Text("Coach") },
             )
             NavigationRailItem(
               selected = currentDestination?.hasRoute<SettingsRoute>() == true,
-              onClick = { navigateToTab(SettingsRoute) },
+              onClick = { navigateToTopTab(SettingsRoute) },
               icon = { Icon(Icons.Rounded.Tune, contentDescription = "Settings") },
               label = { Text("Settings") },
             )
           }
         }
 
-        Column(modifier = Modifier.weight(1f).fillMaxHeight(), horizontalAlignment = Alignment.CenterHorizontally) {
+        Column(
+          modifier = Modifier.weight(1f).fillMaxHeight(),
+          horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
           Box(modifier = Modifier.weight(1f).widthIn(max = 860.dp).fillMaxWidth()) {
-            NavHost(navController = navController, startDestination = LibraryRoute) {
+            NavHost(navController = navController, startDestination = HomeRoute) {
+              composable<HomeRoute> {
+                HomeScreen(
+                  settings = settings,
+                  notes = notes,
+                  savedPhrases = savedPhrases,
+                  attempts = attempts,
+                  translations = translations,
+                  onToggleFloatingShortcut = { viewModel.setFloatingShortcutEnabled(it) },
+                  onResumeDocument = { doc ->
+                    viewModel.openNoteInReader(doc, autoPlay = true, resumeLastPosition = true)
+                    navigateToTopTab(ReaderRoute)
+                  },
+                  onOpenLibrary = { navController.navigate(LibraryRoute) },
+                  onOpenReader = { navigateToTopTab(ReaderRoute) },
+                  onOpenTranslation = { navigateToTopTab(TranslationRoute) },
+                  onOpenCoach = { navigateToTopTab(CoachRoute) },
+                  onOpenPractice = { navController.navigate(PracticeRoute) },
+                  onOpenVocabulary = { navController.navigate(VocabularyRoute) },
+                  onOpenProgress = { navController.navigate(ProgressRoute) },
+                  onOpenFloatingSettings = { navController.navigate(FloatingSettingsRoute) },
+                  onOpenStudio = { navController.navigate(StudioRoute) },
+                  onOpenSettings = { navigateToTopTab(SettingsRoute) },
+                )
+              }
+
               composable<LibraryRoute> {
                 LibraryScreen(
                   notes = notes,
                   settings = settings,
                   isImporting = isImporting,
                   importBanner = importBanner,
+                  onBack = { navController.popBackStack() },
                   onDismissImportBanner = { viewModel.clearImportBanner() },
                   onOpenNote = { note, autoPlay ->
-                    viewModel.openNoteInReader(note, autoPlay)
-                    navigateToTab(ReaderRoute)
+                    viewModel.openNoteInReader(note, autoPlay, resumeLastPosition = true)
+                    navigateToTopTab(ReaderRoute)
                   },
                   onSaveNote = { id, title, content, cat, lang ->
                     viewModel.saveNote(id, title, content, cat, lang)
                   },
                   onDeleteNote = { viewModel.deleteNote(it) },
                   onImportDocumentUri = { uri ->
-                    viewModel.importDocumentUri(uri) { navigateToTab(ReaderRoute) }
+                    viewModel.importDocumentUri(uri) { navigateToTopTab(ReaderRoute) }
                   },
                   onImportImageUri = { uri ->
-                    viewModel.importImageForOcr(uri) { navigateToTab(ReaderRoute) }
+                    viewModel.importImageForOcr(uri) { navigateToTopTab(ReaderRoute) }
                   },
                   onQuickReadText = { title, content ->
                     viewModel.readAdHocText(title, content, autoPlay = true)
-                    navigateToTab(ReaderRoute)
+                    navigateToTopTab(ReaderRoute)
                   },
                   onToggleFloatingShortcut = { viewModel.setFloatingShortcutEnabled(it) },
-                  onOpenSettings = { navigateToTab(SettingsRoute) },
+                  onOpenSettings = { navController.navigate(FloatingSettingsRoute) },
                 )
               }
 
               composable<ReaderRoute> {
                 ReaderScreen(
                   state = sessionState,
+                  preferredGender = preferredGender,
+                  inlineSheetState = inlineSheetState,
                   onJumpToSentence = { viewModel.speechCoordinator.jumpToSentence(it, autoPlay = true) },
                   onReadParagraph = { viewModel.speechCoordinator.readParagraph(it) },
                   onToggleSkipHeadings = { viewModel.speechCoordinator.toggleSkipHeadingsAndRefs() },
                   onToggleRepeat = { viewModel.speechCoordinator.toggleRepeatCurrentSentence() },
                   onBookmark = { viewModel.speechCoordinator.bookmarkCurrentPosition() },
-                  onNavigateToLibrary = { navigateToTab(LibraryRoute) },
+                  onSelectVolume = { viewModel.speechCoordinator.setVolume(it) },
+                  onSelectGender = { viewModel.speechCoordinator.setGenderFilter(it) },
+                  onSelectListenAudioMode = { viewModel.speechCoordinator.setListenAudioMode(it) },
+                  onOpenSentenceAssist = { text, lang ->
+                    viewModel.openSentenceAssistSheet(text, lang)
+                  },
+                  onExplainSheetPassage = { viewModel.explainCurrentSheetPassage() },
+                  onDismissSentenceAssist = { viewModel.dismissSentenceAssistSheet() },
+                  onSpeakTextSlowly = { text, lang ->
+                    viewModel.speechCoordinator.speakOneShot(text, lang, speed = 0.75f)
+                  },
+                  onPracticeInCoach = { text, lang ->
+                    viewModel.setCoachTarget(text, lang)
+                    navigateToTopTab(CoachRoute)
+                  },
+                  onSavePhrase = { phrase, translation, lang, guide ->
+                    viewModel.savePhraseToVocabulary(phrase, translation, lang, guide)
+                  },
+                  onNavigateToLibrary = { navController.navigate(LibraryRoute) },
+                )
+              }
+
+              composable<TranslationRoute> {
+                TranslationScreen(
+                  inputText = translationInput,
+                  sourceLang = translationSourceLang,
+                  targetLang = translationTargetLang,
+                  tone = translationTone,
+                  uiState = translationUiState,
+                  history = translations,
+                  onInputChange = { viewModel.updateTranslationInput(it) },
+                  onSelectLanguages = { src, tgt -> viewModel.setTranslationLanguages(src, tgt) },
+                  onSwapLanguages = { viewModel.swapTranslationLanguages() },
+                  onSelectTone = { viewModel.setTranslationTone(it) },
+                  onTranslate = { viewModel.runTranslation() },
+                  onListenText = { text, lang -> viewModel.speechCoordinator.speakOneShot(text, lang) },
+                  onPracticeInCoach = { text, lang ->
+                    viewModel.setCoachTarget(text, lang)
+                    navigateToTopTab(CoachRoute)
+                  },
+                  onSavePhrase = { phrase, translation, lang, guide, notesText ->
+                    viewModel.savePhraseToVocabulary(phrase, translation, lang, guide, notesText)
+                  },
+                  onDeleteHistoryItem = { viewModel.deleteTranslationHistoryItem(it) },
+                  onClearHistory = { viewModel.clearAllTranslations() },
+                )
+              }
+
+              composable<CoachRoute> {
+                CoachScreen(
+                  targetSentence = coachTargetSentence,
+                  targetLanguage = coachTargetLang,
+                  captureState = captureState,
+                  coachUiState = coachUiState,
+                  onTargetChange = { viewModel.setCoachTarget(it, coachTargetLang) },
+                  onSelectTargetDrill = { text, lang -> viewModel.setCoachTarget(text, lang) },
+                  onSelectLanguage = { viewModel.setCoachTargetLanguage(it) },
+                  onListenReference = { text, lang, speed ->
+                    viewModel.speechCoordinator.speakOneShot(text, lang, speed)
+                  },
+                  onStartAudioRecord = { viewModel.startCoachAudioRecording() },
+                  onStopAudioRecordAndAnalyze = { viewModel.stopCoachAudioRecordingAndAnalyze() },
+                  onStartLiveAsr = { viewModel.startCoachLiveAsr() },
+                  onStopLiveAsr = { viewModel.stopCoachLiveAsr() },
+                  onPlayUserRecording = { path -> viewModel.speechCoachManager.playUserRecording(path) },
+                )
+              }
+
+              composable<PracticeRoute> {
+                PracticeScreen(
+                  captureState = captureState,
+                  freeSpeakTranscript = freeSpeakTranscript,
+                  freeSpeakUiState = freeSpeakUiState,
+                  onBack = { navController.popBackStack() },
+                  onListenText = { text, lang, speed ->
+                    viewModel.speechCoordinator.speakOneShot(text, lang, speed)
+                  },
+                  onTranscriptChange = { viewModel.updateFreeSpeakTranscript(it) },
+                  onStartSpeakAsr = { lang -> viewModel.startFreeSpeakAsr(lang) },
+                  onStartSpeakAudio = { viewModel.startFreeSpeakAudioRecording() },
+                  onStopSpeakAudio = { lang -> viewModel.stopFreeSpeakAudioAndAnalyze(lang) },
+                  onSubmitFreeSpeak = { lang -> viewModel.submitFreeSpeakForFeedback(targetLanguage = lang) },
+                )
+              }
+
+              composable<VocabularyRoute> {
+                VocabularyScreen(
+                  phrases = savedPhrases,
+                  onBack = { navController.popBackStack() },
+                  onSavePhrase = { p, t, l, g, n ->
+                    viewModel.savePhraseToVocabulary(p, t, l, g, n)
+                  },
+                  onCycleMastery = { item ->
+                    val next = (item.masteryLevel + 1) % 4
+                    viewModel.updatePhraseMastery(item.id, next)
+                  },
+                  onDeletePhrase = { viewModel.deletePhrase(it) },
+                  onListenPhrase = { text, lang, speed ->
+                    viewModel.speechCoordinator.speakOneShot(text, lang, speed)
+                  },
+                  onPracticePhrase = { text, lang ->
+                    viewModel.setCoachTarget(text, lang)
+                    navigateToTopTab(CoachRoute)
+                  },
+                )
+              }
+
+              composable<ProgressRoute> {
+                ProgressScreen(
+                  attempts = attempts,
+                  savedPhrases = savedPhrases,
+                  translations = translations,
+                  onBack = { navController.popBackStack() },
+                  onPracticeSentence = { sentence, lang ->
+                    viewModel.setCoachTarget(sentence, lang)
+                    navigateToTopTab(CoachRoute)
+                  },
+                  onPlayAttemptAudio = { path -> viewModel.speechCoachManager.playUserRecording(path) },
+                  onClearVoiceData = { viewModel.clearAllVoiceData() },
+                )
+              }
+
+              composable<FloatingSettingsRoute> {
+                FloatingSettingsScreen(
+                  settings = settings,
+                  onBack = { navController.popBackStack() },
+                  onToggleFloatingShortcut = { viewModel.setFloatingShortcutEnabled(it) },
+                  onUpdateButtonSize = { viewModel.updateFloatingButtonSize(it) },
+                  onUpdateButtonAlpha = { viewModel.updateFloatingButtonAlpha(it) },
+                  onResetButtonPosition = { viewModel.resetFloatingButtonPosition() },
+                  onSetDoubleTapToggle = { viewModel.setDoubleTapToTogglePlay(it) },
                 )
               }
 
@@ -340,34 +587,39 @@ fun ClinNoteRootScreen(
                   onDeleteRule = { viewModel.deletePronunciationRule(it) },
                   onOpenBookmark = { bm ->
                     viewModel.openBookmarkInReader(bm, autoPlay = true)
-                    navigateToTab(ReaderRoute)
+                    navigateToTopTab(ReaderRoute)
                   },
                   onDeleteBookmark = { viewModel.deleteBookmark(it) },
                   onOpenHistory = { entry ->
                     viewModel.openHistoryInReader(entry, autoPlay = true)
-                    navigateToTab(ReaderRoute)
+                    navigateToTopTab(ReaderRoute)
                   },
                   onDeleteHistory = { viewModel.deleteHistoryEntry(it) },
                   onClearHistory = { viewModel.clearAllHistory() },
+                  onBack = { navController.popBackStack() },
                 )
               }
 
               composable<SettingsRoute> {
                 SettingsScreen(
                   settings = settings,
-                  onToggleFloatingShortcut = { viewModel.setFloatingShortcutEnabled(it) },
-                  onUpdateButtonSize = { viewModel.updateFloatingButtonSize(it) },
-                  onUpdateButtonAlpha = { viewModel.updateFloatingButtonAlpha(it) },
-                  onResetButtonPosition = { viewModel.resetFloatingButtonPosition() },
-                  onSetDoubleTapToggle = { viewModel.setDoubleTapToTogglePlay(it) },
+                  onOpenFloatingSettings = { navController.navigate(FloatingSettingsRoute) },
+                  onOpenVoicesStudio = { navController.navigate(StudioRoute) },
                   onSetDefaultLanguage = { viewModel.setDefaultLanguage(it) },
+                  onSetEnglishAccent = { viewModel.setEnglishAccent(it) },
+                  onSetGenderFilter = { viewModel.speechCoordinator.setGenderFilter(it) },
                   onSetAutoDetect = { viewModel.setAutoDetectLanguage(it) },
                   onSetMixedArabicEnglish = { viewModel.setMixArabicEnglishSwitching(it) },
                   onSetSpeed = { viewModel.speechCoordinator.setSpeed(it) },
                   onSetPitch = { viewModel.speechCoordinator.setPitch(it) },
+                  onSetVolume = { viewModel.speechCoordinator.setVolume(it) },
                   onToggleSkipHeadings = { viewModel.speechCoordinator.toggleSkipHeadingsAndRefs() },
+                  onSetOnlineAiEnabled = { viewModel.setOnlineAiEnabled(it) },
                   onSetReadingHistoryEnabled = { viewModel.setReadingHistoryEnabled(it) },
+                  onSetSaveVoiceRecordingsConsent = { viewModel.setSaveVoiceRecordingsConsent(it) },
                   onClearHistory = { viewModel.clearAllHistory() },
+                  onClearTranslations = { viewModel.clearAllTranslations() },
+                  onClearVoiceData = { viewModel.clearAllVoiceData() },
                 )
               }
             }
@@ -383,9 +635,17 @@ fun ClinNoteRootScreen(
                 onNext = { viewModel.speechCoordinator.nextSentence() },
                 onRepeatToggle = { viewModel.speechCoordinator.toggleRepeatCurrentSentence() },
                 onSelectSpeed = { viewModel.speechCoordinator.setSpeed(it) },
+                onSelectVolume = { viewModel.speechCoordinator.setVolume(it) },
                 onSelectLanguage = { viewModel.speechCoordinator.selectLanguageOverride(it) },
                 onBookmark = { viewModel.speechCoordinator.bookmarkCurrentPosition() },
-                onOpenReader = { navigateToTab(ReaderRoute) },
+                onTranslateCurrent = {
+                  val sentence = sessionState.currentSentence
+                  if (sentence != null) {
+                    viewModel.openSentenceAssistSheet(sentence.rawText, sentence.detectedLanguageTag)
+                    navigateToTopTab(ReaderRoute)
+                  }
+                },
+                onOpenReader = { navigateToTopTab(ReaderRoute) },
               )
             }
           }

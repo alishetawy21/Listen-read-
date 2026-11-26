@@ -18,6 +18,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Bookmark
 import androidx.compose.material.icons.rounded.CheckCircle
@@ -45,6 +46,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -88,6 +90,7 @@ fun StudioScreen(
   onOpenHistory: (ReadingHistoryEntity) -> Unit,
   onDeleteHistory: (Long) -> Unit,
   onClearHistory: () -> Unit,
+  onBack: (() -> Unit)? = null,
   modifier: Modifier = Modifier,
 ) {
   var selectedTab by remember { mutableIntStateOf(0) }
@@ -96,6 +99,16 @@ fun StudioScreen(
   var showCloudDialog by remember { mutableStateOf(false) }
 
   Column(modifier = modifier.fillMaxSize()) {
+    if (onBack != null) {
+      TopAppBar(
+        title = { Text("Voices, Dictionary & Bookmarks") },
+        navigationIcon = {
+          IconButton(onClick = onBack) {
+            Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
+          }
+        },
+      )
+    }
     PrimaryTabRow(selectedTabIndex = selectedTab) {
       Tab(
         selected = selectedTab == 0,
@@ -577,7 +590,7 @@ private fun CloudBackendAdapterDialog(
     text = {
       Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text(
-          "By default, ClinNote processes all speech locally on your device. Only enable this if you host your own authenticated HTTPS TTS proxy. No API keys are ever stored in this app.",
+          "By default, LinguaFloat processes speech locally on your device. Only enable this if you host your own authenticated HTTPS TTS proxy. No API keys are ever stored in this app.",
           style = MaterialTheme.typography.bodyMedium,
           color = MaterialTheme.colorScheme.onSurfaceVariant,
         )

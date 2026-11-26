@@ -7,13 +7,14 @@ import com.example.data.ClinNoteRepository
 import com.example.data.PronunciationRuleEntity
 import com.example.data.ReaderSettingsStore
 import com.example.model.CaptureSource
+import com.example.model.ListenAudioMode
 import com.example.model.PLAYBACK_SPEED_PRESETS
 import com.example.model.PlaybackStatus
-import com.example.model.ReaderSentence
 import com.example.model.ReaderSessionState
 import com.example.model.ReaderSettings
 import com.example.model.SpeechSegment
 import com.example.model.SupportedLanguages
+import com.example.model.VoiceGender
 import com.example.model.VoiceInfoModel
 import com.example.model.VoiceQualityTier
 import com.example.nlp.LanguageDetector
@@ -67,6 +68,7 @@ class SpeechCoordinator(
           state.copy(
             speechSpeed = settings.speechSpeed,
             speechPitch = settings.speechPitch,
+            speechVolume = settings.speechVolume,
             skipHeadingsAndRefs = settings.skipHeadingsAndReferences,
           )
         }
@@ -131,11 +133,19 @@ class SpeechCoordinator(
     if (preferredId != null) {
       voices.firstOrNull { it.id == preferredId }?.let { return it }
     }
-    return voices.firstOrNull {
-      it.localeTag.equals(languageTag, ignoreCase = true)
-    } ?: voices.firstOrNull {
-      it.languageCode.equals(languageTag.substringBefore('-'), ignoreCase = true)
+
+    val targetGender = runCatching { VoiceGender.valueOf(latestSettings.preferredGender) }.getOrDefault(VoiceGender.ANY)
+    val matchingLocale =
+      voices.filter { it.localeTag.equals(languageTag, ignoreCase = true) }
+    val matchingLang =
+      voices.filter { it.languageCode.equals(languageTag.substringBefore('-'), ignoreCase = true) }
+
+    if (targetGender != VoiceGender.ANY) {
+      matchingLocale.firstOrNull { it.gender == targetGender }?.let { return it }
+      matchingLang.firstOrNull { it.gender == targetGender }?.let { return it }
     }
+
+    return matchingLocale.firstOrNull() ?: matchingLang.firstOrNull()
   }
 
   fun loadText(
@@ -352,6 +362,7 @@ class SpeechCoordinator(
         activeLanguageTag = targetSentence.detectedLanguageTag,
       )
     }
+    persistDocumentProgress(state.documentId, index)
     if (autoPlay) {
       ensurePlaybackServiceRunning()
       scope.launch {
@@ -366,6 +377,58 @@ class SpeechCoordinator(
       _sessionState.value.sentences.indexOfFirst { it.paragraphIndex == paragraphIndex }
     if (firstSentenceIdx >= 0) {
       jumpToSentence(firstSentenceIdx, autoPlay = true)
+    }
+  }
+
+  fun speakOneShot(
+    text: String,
+    languageTag: String = "auto",
+    speed: Float = _sessionState.value.speechSpeed,
+  ) {
+    if (text.isBlank()) return
+    pauseAfterSegmentJob?.cancel()
+    currentUtteranceId = null
+    androidProvider.stop()
+    cloudProvider.stop()
+
+    val resolvedLang =
+      if (languageTag == "auto") LanguageDetector.detectLanguage(text) else languageTag
+    val voices = _sessionState.value.availableVoices
+    val preferredVoice = resolvePreferredVoice(resolvedLang, voices)?.id
+
+    scope.launch {
+      if (!androidProvider.isReady()) {
+        androidProvider.initialize()
+        refreshAvailableVoices()
+      }
+      val normalized =
+        TextNormalizer.parseDocument(
+            rawText = text,
+            manualLanguageTag = resolvedLang,
+            autoDetect = false,
+            defaultLanguageTag = resolvedLang,
+            enableMixedArabicEnglish = latestSettings.mixArabicEnglishSwitching,
+            customRules = cachedRules,
+          )
+          .firstOrNull()
+          ?.segments
+          ?.firstOrNull()
+          ?: SpeechSegment(
+            text = text,
+            spokenText = text,
+            languageTag = resolvedLang,
+            isRtl = LanguageDetector.isRtlLanguage(resolvedLang),
+          )
+
+      activeProvider().speakSegment(
+        segment = normalized,
+        utteranceId = "oneshot_${UUID.randomUUID()}",
+        preferredVoiceId = preferredVoice,
+        speed = speed.coerceIn(0.5f, 3.0f),
+        pitch = _sessionState.value.speechPitch,
+        volume = _sessionState.value.speechVolume,
+        pauseAfterMs = 0L,
+      )
     }
   }
 
@@ -389,6 +452,25 @@ class SpeechCoordinator(
     val clamped = pitch.coerceIn(0.5f, 2.0f)
     _sessionState.update { it.copy(speechPitch = clamped) }
     scope.launch { settingsStore.updateSettings { it.copy(speechPitch = clamped) } }
+  }
+
+  fun setVolume(volume: Float) {
+    val clamped = volume.coerceIn(0.1f, 1.0f)
+    _sessionState.update { it.copy(speechVolume = clamped) }
+    scope.launch { settingsStore.updateSettings { it.copy(speechVolume = clamped) } }
+    if (_sessionState.value.status == PlaybackStatus.PLAYING) {
+      speakCurrentSegment()
+    }
+  }
+
+  fun setGenderFilter(gender: VoiceGender) {
+    scope.launch {
+      settingsStore.updateSettings { it.copy(preferredGender = gender.name) }
+    }
+  }
+
+  fun setListenAudioMode(mode: ListenAudioMode) {
+    _sessionState.update { it.copy(listenAudioMode = mode) }
   }
 
   fun selectLanguageOverride(languageTag: String) {
@@ -467,9 +549,9 @@ class SpeechCoordinator(
   fun testVoiceSample(voice: VoiceInfoModel) {
     val sampleText =
       if (voice.languageCode.startsWith("ar", ignoreCase = true)) {
-        "مرحباً، هذا نموذجُ قراءةٍ طبيةٍ باللغة العربية الفصحى من تطبيق كلين نوت."
+        "مرحباً، هذا نموذجُ قراءةٍ واضحةٍ باللغة العربية الفصحى من تطبيق لينغوا فلوت."
       } else {
-        "ClinNote clinical speech check. Blood pressure 120 over 80 millimeters of mercury."
+        "LinguaFloat voice preview. Clear, natural bilingual pronunciation for reading and speaking."
       }
     scope.launch {
       if (!androidProvider.isReady()) androidProvider.initialize()
@@ -486,6 +568,7 @@ class SpeechCoordinator(
         preferredVoiceId = voice.id,
         speed = _sessionState.value.speechSpeed,
         pitch = _sessionState.value.speechPitch,
+        volume = _sessionState.value.speechVolume,
       )
     }
   }
@@ -521,6 +604,13 @@ class SpeechCoordinator(
   fun launchOfflineVoiceInstaller(): Boolean =
     androidProvider.openOfflineVoiceDataInstaller()
 
+  private fun persistDocumentProgress(documentId: Long?, sentenceIndex: Int) {
+    if (documentId == null || documentId <= 0L) return
+    scope.launch(Dispatchers.IO) {
+      repository.updateDocumentReadingProgress(documentId, sentenceIndex)
+    }
+  }
+
   private fun findNextSpeakableIndex(startFrom: Int, forward: Boolean): Int {
     val state = _sessionState.value
     val sentences = state.sentences
@@ -554,6 +644,7 @@ class SpeechCoordinator(
         errorMessage = null,
       )
     }
+    persistDocumentProgress(state.documentId, sentenceIndex)
 
     speakCurrentSegment()
   }
@@ -594,6 +685,7 @@ class SpeechCoordinator(
         preferredVoiceId = preferredVoice,
         speed = state.speechSpeed,
         pitch = state.speechPitch,
+        volume = state.speechVolume,
         pauseAfterMs = pauseMs,
       )
 
@@ -604,6 +696,7 @@ class SpeechCoordinator(
         preferredVoiceId = preferredVoice,
         speed = state.speechSpeed,
         pitch = state.speechPitch,
+        volume = state.speechVolume,
         pauseAfterMs = pauseMs,
       )
     }

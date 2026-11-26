@@ -1,13 +1,13 @@
 <resources>
-    <string name="app_name">ClinNote</string>
-    <string name="process_text_label">Read with ClinNote</string>
-    <string name="share_text_label">Read in ClinNote</string>
-    <string name="accessibility_service_label">ClinNote Smart Text Reader</string>
-    <string name="accessibility_service_description">Captures only explicitly selected or screen-visible readable text when you tap the ClinNote floating shortcut. Never captures passwords, secure fields, or continuous background screen activity.</string>
+    <string name="app_name">LinguaFloat</string>
+    <string name="process_text_label">LinguaFloat: Read / Translate</string>
+    <string name="share_text_label">Open in LinguaFloat</string>
+    <string name="accessibility_service_label">LinguaFloat Floating Assistant</string>
+    <string name="accessibility_service_description">Captures only explicitly selected or screen-visible readable text when you tap the LinguaFloat floating assistant. Never captures passwords, secure fields, or background activity.</string>
     <string name="notification_channel_playback">Speech Playback Controls</string>
     <string name="notification_channel_playback_desc">Persistent controls for reading notes, PDFs, and selected text aloud.</string>
     <string name="notification_channel_shortcut">Floating Reader Shortcut</string>
-    <string name="notification_channel_shortcut_desc">Keeps the ClinNote floating reading button active across apps.</string>
+    <string name="notification_channel_shortcut_desc">Keeps the LinguaFloat floating language assistant active across apps.</string>
     <string name="action_play">Play</string>
     <string name="action_pause">Pause</string>
     <string name="action_stop">Stop</string>

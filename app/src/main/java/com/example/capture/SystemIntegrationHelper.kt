@@ -46,6 +46,11 @@ object SystemIntegrationHelper {
     }
   }
 
+  fun hasMicrophonePermission(context: Context): Boolean {
+    return ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
+      PackageManager.PERMISSION_GRANTED
+  }
+
   fun openOverlayPermissionSettings(context: Context) {
     val intent =
       Intent(
@@ -64,11 +69,13 @@ object SystemIntegrationHelper {
     runCatching { context.startActivity(intent) }
   }
 
-  fun startFloatingShortcut(context: Context) {
+  fun startFloatingShortcut(context: Context, expandToolbar: Boolean = false) {
     if (!canDrawOverlays(context)) return
     val intent =
       Intent(context, FloatingShortcutService::class.java).apply {
-        action = FloatingShortcutService.ACTION_SHOW
+        action =
+          if (expandToolbar) FloatingShortcutService.ACTION_EXPAND_MINI_PLAYER
+          else FloatingShortcutService.ACTION_SHOW
       }
     runCatching {
       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {

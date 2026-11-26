@@ -11,8 +11,11 @@ import androidx.room.RoomDatabase
     PronunciationRuleEntity::class,
     ReadingBookmarkEntity::class,
     ReadingHistoryEntity::class,
+    TranslationHistoryEntity::class,
+    SavedPhraseEntity::class,
+    PronunciationAttemptEntity::class,
   ],
-  version = 1,
+  version = 2,
   exportSchema = false,
 )
 abstract class ClinNoteDatabase : RoomDatabase() {
@@ -24,6 +27,12 @@ abstract class ClinNoteDatabase : RoomDatabase() {
 
   abstract fun readingHistoryDao(): ReadingHistoryDao
 
+  abstract fun translationHistoryDao(): TranslationHistoryDao
+
+  abstract fun savedPhraseDao(): SavedPhraseDao
+
+  abstract fun pronunciationAttemptDao(): PronunciationAttemptDao
+
   companion object {
     @Volatile private var INSTANCE: ClinNoteDatabase? = null
 
@@ -34,8 +43,9 @@ abstract class ClinNoteDatabase : RoomDatabase() {
             ?: Room.databaseBuilder(
                 context.applicationContext,
                 ClinNoteDatabase::class.java,
-                "clinnote_database.db",
+                "linguafloat_database.db",
               )
+              .fallbackToDestructiveMigration(dropAllTables = true)
               .build()
               .also { INSTANCE = it }
         }

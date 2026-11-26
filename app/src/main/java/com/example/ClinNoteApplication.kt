@@ -4,6 +4,8 @@ import android.app.Application
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.os.Build
+import com.example.ai.LinguaAiService
+import com.example.coach.SpeechCoachManager
 import com.example.data.ClinNoteDatabase
 import com.example.data.ClinNoteRepository
 import com.example.data.ReaderSettingsStore
@@ -25,10 +27,16 @@ class ClinNoteApplication : Application() {
   lateinit var settingsStore: ReaderSettingsStore
     private set
 
+  lateinit var linguaAiService: LinguaAiService
+    private set
+
   lateinit var pdfProcessor: PdfDocumentProcessor
     private set
 
   lateinit var speechCoordinator: SpeechCoordinator
+    private set
+
+  lateinit var speechCoachManager: SpeechCoachManager
     private set
 
   private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -41,8 +49,10 @@ class ClinNoteApplication : Application() {
     database = ClinNoteDatabase.getInstance(this)
     repository = ClinNoteRepository(database)
     settingsStore = ReaderSettingsStore(this)
-    pdfProcessor = PdfDocumentProcessor(this)
+    linguaAiService = LinguaAiService()
+    pdfProcessor = PdfDocumentProcessor(this, linguaAiService)
     speechCoordinator = SpeechCoordinator(this, repository, settingsStore)
+    speechCoachManager = SpeechCoachManager(this)
 
     appScope.launch { repository.seedInitialDataIfEmpty() }
   }

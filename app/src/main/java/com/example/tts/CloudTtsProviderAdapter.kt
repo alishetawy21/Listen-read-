@@ -86,6 +86,7 @@ class CloudTtsProviderAdapter(
     preferredVoiceId: String?,
     speed: Float,
     pitch: Float,
+    volume: Float,
     pauseAfterMs: Long,
   ): Boolean {
     if (!isConfigured()) {

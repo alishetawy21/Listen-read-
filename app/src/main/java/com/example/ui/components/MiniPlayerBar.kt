@@ -31,6 +31,8 @@ import androidx.compose.material.icons.rounded.SkipNext
 import androidx.compose.material.icons.rounded.SkipPrevious
 import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material.icons.rounded.Stop
+import androidx.compose.material.icons.rounded.Translate
+import androidx.compose.material.icons.rounded.VolumeUp
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilledIconButton
@@ -41,6 +43,7 @@ import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.minimumInteractiveComponentSize
@@ -74,8 +77,10 @@ fun MiniPlayerBar(
   onNext: () -> Unit,
   onRepeatToggle: () -> Unit,
   onSelectSpeed: (Float) -> Unit,
+  onSelectVolume: (Float) -> Unit,
   onSelectLanguage: (String) -> Unit,
   onBookmark: () -> Unit,
+  onTranslateCurrent: () -> Unit,
   onOpenReader: () -> Unit,
   modifier: Modifier = Modifier,
 ) {
@@ -192,7 +197,7 @@ fun MiniPlayerBar(
               Icon(Icons.Rounded.SkipPrevious, contentDescription = "Previous sentence")
             }
 
-            Spacer(Modifier.width(8.dp))
+            Spacer(Modifier.width(6.dp))
 
             FilledIconButton(
               onClick = onPlayPause,
@@ -208,7 +213,7 @@ fun MiniPlayerBar(
               )
             }
 
-            Spacer(Modifier.width(8.dp))
+            Spacer(Modifier.width(6.dp))
 
             FilledTonalIconButton(
               onClick = onNext,
@@ -217,7 +222,7 @@ fun MiniPlayerBar(
               Icon(Icons.Rounded.SkipNext, contentDescription = "Next sentence")
             }
 
-            Spacer(Modifier.width(6.dp))
+            Spacer(Modifier.width(4.dp))
 
             IconButton(
               onClick = onStop,
@@ -234,7 +239,7 @@ fun MiniPlayerBar(
               color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
 
-            Spacer(Modifier.width(8.dp))
+            Spacer(Modifier.width(6.dp))
 
             Surface(
               modifier =
@@ -270,50 +275,80 @@ fun MiniPlayerBar(
           enter = expandVertically(),
           exit = shrinkVertically(),
         ) {
-          Row(
-            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-          ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-              Box(
-                modifier =
-                  Modifier.size(8.dp)
-                    .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.secondary)
-              )
-              Spacer(Modifier.width(6.dp))
-              Text(
-                text = "${state.activeVoiceLabel} · ${state.activeQualityTier.label}",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-              )
-            }
+          Column(modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
+            Row(
+              modifier = Modifier.fillMaxWidth(),
+              horizontalArrangement = Arrangement.SpaceBetween,
+              verticalAlignment = Alignment.CenterVertically,
+            ) {
+              Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                Box(
+                  modifier =
+                    Modifier.size(8.dp)
+                      .clip(CircleShape)
+                      .background(MaterialTheme.colorScheme.secondary)
+                )
+                Spacer(Modifier.width(6.dp))
+                Text(
+                  text = "${state.activeVoiceLabel} · ${state.activeQualityTier.label}",
+                  style = MaterialTheme.typography.labelSmall,
+                  color = MaterialTheme.colorScheme.onSurfaceVariant,
+                  maxLines = 1,
+                  overflow = TextOverflow.Ellipsis,
+                )
+              }
 
-            Row(verticalAlignment = Alignment.CenterVertically) {
-              IconButton(
-                onClick = onRepeatToggle,
-                modifier = Modifier.minimumInteractiveComponentSize(),
-              ) {
-                Icon(
-                  imageVector = Icons.Rounded.Repeat,
-                  contentDescription = "Repeat current sentence",
-                  tint =
-                    if (state.repeatCurrentSentence) MaterialTheme.colorScheme.tertiary
-                    else MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+              Row(verticalAlignment = Alignment.CenterVertically) {
+                IconButton(
+                  onClick = onTranslateCurrent,
+                  modifier = Modifier.minimumInteractiveComponentSize(),
+                ) {
+                  Icon(
+                    imageVector = Icons.Rounded.Translate,
+                    contentDescription = "Translate current sentence",
+                    tint = MaterialTheme.colorScheme.secondary,
+                  )
+                }
+                IconButton(
+                  onClick = onRepeatToggle,
+                  modifier = Modifier.minimumInteractiveComponentSize(),
+                ) {
+                  Icon(
+                    imageVector = Icons.Rounded.Repeat,
+                    contentDescription = "Repeat current sentence",
+                    tint =
+                      if (state.repeatCurrentSentence) MaterialTheme.colorScheme.tertiary
+                      else MaterialTheme.colorScheme.onSurfaceVariant,
+                  )
+                }
+                IconButton(
+                  onClick = onBookmark,
+                  modifier = Modifier.minimumInteractiveComponentSize(),
+                ) {
+                  Icon(
+                    imageVector = Icons.Rounded.BookmarkAdd,
+                    contentDescription = "Bookmark reading position",
+                  )
+                }
               }
-              IconButton(
-                onClick = onBookmark,
-                modifier = Modifier.minimumInteractiveComponentSize(),
-              ) {
-                Icon(
-                  imageVector = Icons.Rounded.BookmarkAdd,
-                  contentDescription = "Bookmark reading position",
-                )
-              }
+            }
+            Row(
+              modifier = Modifier.fillMaxWidth(),
+              verticalAlignment = Alignment.CenterVertically,
+            ) {
+              Icon(
+                imageVector = Icons.Rounded.VolumeUp,
+                contentDescription = "Speech volume",
+                modifier = Modifier.size(18.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+              )
+              Spacer(Modifier.width(8.dp))
+              Slider(
+                value = state.speechVolume,
+                onValueChange = onSelectVolume,
+                valueRange = 0.1f..1.0f,
+                modifier = Modifier.weight(1f),
+              )
             }
           }
         }

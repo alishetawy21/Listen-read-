@@ -13,17 +13,17 @@ import androidx.compose.ui.unit.dp
 private val DarkColorScheme =
   darkColorScheme(
     primary = DarkPrimary,
-    onPrimary = Color(0xFF00272E),
+    onPrimary = Color(0xFF00273B),
     primaryContainer = DarkPrimaryContainer,
     onPrimaryContainer = DarkOnPrimaryContainer,
     secondary = DarkSecondary,
-    onSecondary = Color(0xFF022823),
+    onSecondary = Color(0xFF022930),
     secondaryContainer = DarkSecondaryContainer,
-    onSecondaryContainer = Color(0xFFD6F2EC),
+    onSecondaryContainer = Color(0xFFCFF3F8),
     tertiary = DarkCoralAccent,
-    onTertiary = Color(0xFF3A1204),
+    onTertiary = Color(0xFF3E1404),
     tertiaryContainer = DarkCoralContainer,
-    onTertiaryContainer = Color(0xFFFFE1D6),
+    onTertiaryContainer = Color(0xFFFFE2D8),
     background = DarkBackground,
     onBackground = DarkTextPrimary,
     surface = DarkSurface,
@@ -35,14 +35,14 @@ private val DarkColorScheme =
 
 private val LightColorScheme =
   lightColorScheme(
-    primary = ClinicalTealPrimary,
+    primary = LinguaNavyPrimary,
     onPrimary = Color.White,
-    primaryContainer = ClinicalTealContainer,
-    onPrimaryContainer = OnClinicalTealContainer,
-    secondary = SeafoamSecondary,
+    primaryContainer = LinguaNavyContainer,
+    onPrimaryContainer = OnLinguaNavyContainer,
+    secondary = CyanTealSecondary,
     onSecondary = Color.White,
-    secondaryContainer = SeafoamContainer,
-    onSecondaryContainer = OnSeafoamContainer,
+    secondaryContainer = CyanTealContainer,
+    onSecondaryContainer = OnCyanTealContainer,
     tertiary = CoralAccent,
     onTertiary = Color.White,
     tertiaryContainer = CoralContainer,
@@ -64,7 +64,7 @@ val ClinNoteShapes =
   )
 
 @Composable
-fun ClinNoteTheme(
+fun LinguaFloatTheme(
   darkTheme: Boolean = isSystemInDarkTheme(),
   content: @Composable () -> Unit,
 ) {
@@ -76,4 +76,12 @@ fun ClinNoteTheme(
     shapes = ClinNoteShapes,
     content = content,
   )
+}
+
+@Composable
+fun ClinNoteTheme(
+  darkTheme: Boolean = isSystemInDarkTheme(),
+  content: @Composable () -> Unit,
+) {
+  LinguaFloatTheme(darkTheme = darkTheme, content = content)
 }

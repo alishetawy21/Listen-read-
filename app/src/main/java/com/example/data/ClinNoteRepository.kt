@@ -1,6 +1,7 @@
 package com.example.data
 
 import com.example.model.CaptureSource
+import java.io.File
 import kotlinx.coroutines.flow.Flow
 
 class ClinNoteRepository(private val database: ClinNoteDatabase) {
@@ -9,18 +10,27 @@ class ClinNoteRepository(private val database: ClinNoteDatabase) {
   private val ruleDao = database.pronunciationRuleDao()
   private val bookmarkDao = database.readingBookmarkDao()
   private val historyDao = database.readingHistoryDao()
+  private val translationDao = database.translationHistoryDao()
+  private val phraseDao = database.savedPhraseDao()
+  private val attemptDao = database.pronunciationAttemptDao()
 
   val notesFlow: Flow<List<ClinicalNoteEntity>> = noteDao.observeAllNotes()
   val pronunciationRulesFlow: Flow<List<PronunciationRuleEntity>> = ruleDao.observeAllRules()
   val bookmarksFlow: Flow<List<ReadingBookmarkEntity>> = bookmarkDao.observeAllBookmarks()
   val historyFlow: Flow<List<ReadingHistoryEntity>> = historyDao.observeHistory()
+  val translationsFlow: Flow<List<TranslationHistoryEntity>> = translationDao.observeTranslations()
+  val savedPhrasesFlow: Flow<List<SavedPhraseEntity>> = phraseDao.observeSavedPhrases()
+  val pronunciationAttemptsFlow: Flow<List<PronunciationAttemptEntity>> = attemptDao.observeAttempts()
 
   suspend fun seedInitialDataIfEmpty() {
     if (noteDao.countNotes() == 0) {
-      starterNotes().forEach { noteDao.insertNote(it) }
+      starterDocuments().forEach { noteDao.insertNote(it) }
     }
     if (ruleDao.countRules() == 0) {
       starterPronunciationRules().forEach { ruleDao.insertRule(it) }
+    }
+    if (phraseDao.countPhrases() == 0) {
+      starterSavedPhrases().forEach { phraseDao.insertPhrase(it) }
     }
   }
 
@@ -30,7 +40,7 @@ class ClinNoteRepository(private val database: ClinNoteDatabase) {
     id: Long? = null,
     title: String,
     content: String,
-    category: String = "Clinical Note",
+    category: String = "Book / Article",
     sourceType: CaptureSource = CaptureSource.INTERNAL_NOTE,
     languageTag: String = "auto",
     pageCount: Int = 1,
@@ -42,19 +52,20 @@ class ClinNoteRepository(private val database: ClinNoteDatabase) {
         val existing = noteDao.getNoteById(id)
         ClinicalNoteEntity(
           id = id,
-          title = title.trim().ifEmpty { "Untitled Note" },
+          title = title.trim().ifEmpty { "Untitled Document" },
           content = content,
           category = category,
           sourceType = sourceType.name,
           languageTag = languageTag,
           pageCount = pageCount,
           isOcrExtracted = isOcrExtracted,
+          lastSentenceIndex = existing?.lastSentenceIndex ?: 0,
           createdAt = existing?.createdAt ?: now,
           updatedAt = now,
         )
       } else {
         ClinicalNoteEntity(
-          title = title.trim().ifEmpty { "Untitled Note" },
+          title = title.trim().ifEmpty { "Untitled Document" },
           content = content,
           category = category,
           sourceType = sourceType.name,
@@ -66,6 +77,10 @@ class ClinNoteRepository(private val database: ClinNoteDatabase) {
         )
       }
     return noteDao.insertNote(entity)
+  }
+
+  suspend fun updateDocumentReadingProgress(documentId: Long, sentenceIndex: Int) {
+    noteDao.updateReadingProgress(documentId, sentenceIndex, System.currentTimeMillis())
   }
 
   suspend fun deleteNote(id: Long) = noteDao.deleteNoteById(id)
@@ -149,73 +164,150 @@ class ClinNoteRepository(private val database: ClinNoteDatabase) {
 
   suspend fun deleteHistoryEntry(id: Long) = historyDao.deleteHistoryById(id)
 
-  private fun starterNotes(): List<ClinicalNoteEntity> =
+  // Translation history
+  suspend fun recordTranslation(
+    sourceText: String,
+    translatedText: String,
+    sourceLanguage: String,
+    targetLanguage: String,
+    tone: String,
+    contextualNote: String,
+  ) {
+    translationDao.insertTranslation(
+      TranslationHistoryEntity(
+        sourceText = sourceText,
+        translatedText = translatedText,
+        sourceLanguage = sourceLanguage,
+        targetLanguage = targetLanguage,
+        tone = tone,
+        contextualNote = contextualNote,
+      )
+    )
+  }
+
+  suspend fun deleteTranslation(id: Long) = translationDao.deleteTranslationById(id)
+
+  suspend fun clearTranslationHistory() = translationDao.clearAllTranslations()
+
+  // Saved phrases / Vocabulary
+  suspend fun savePhrase(
+    phrase: String,
+    translation: String,
+    languageTag: String,
+    pronunciationGuide: String = "",
+    notes: String = "",
+  ) {
+    if (phrase.isBlank() || translation.isBlank()) return
+    phraseDao.insertPhrase(
+      SavedPhraseEntity(
+        phrase = phrase.trim(),
+        translation = translation.trim(),
+        languageTag = languageTag,
+        pronunciationGuide = pronunciationGuide.trim(),
+        notes = notes.trim(),
+      )
+    )
+  }
+
+  suspend fun updatePhraseMastery(id: Long, level: Int) {
+    phraseDao.updateMastery(id, level.coerceIn(0, 3))
+  }
+
+  suspend fun deletePhrase(id: Long) = phraseDao.deletePhraseById(id)
+
+  // Pronunciation attempts & recordings
+  suspend fun savePronunciationAttempt(
+    targetSentence: String,
+    recognizedTranscript: String,
+    targetLanguage: String,
+    overallScore: Int,
+    verifiedAccuracyPct: Int,
+    measuredWpm: Int,
+    audioAnalyzed: Boolean,
+    coachingSummary: String,
+    recordingFilePath: String?,
+  ) {
+    attemptDao.insertAttempt(
+      PronunciationAttemptEntity(
+        targetSentence = targetSentence,
+        recognizedTranscript = recognizedTranscript,
+        targetLanguage = targetLanguage,
+        overallScore = overallScore,
+        verifiedAccuracyPct = verifiedAccuracyPct,
+        measuredWpm = measuredWpm,
+        audioAnalyzed = audioAnalyzed,
+        coachingSummary = coachingSummary,
+        recordingFilePath = recordingFilePath,
+      )
+    )
+  }
+
+  suspend fun deletePronunciationAttempt(id: Long) = attemptDao.deleteAttemptById(id)
+
+  suspend fun clearAllPronunciationAttemptsAndRecordings() {
+    attemptDao.getAttemptsWithRecordings().forEach { attempt ->
+      attempt.recordingFilePath?.let { path -> runCatching { File(path).delete() } }
+    }
+    attemptDao.clearAllAttempts()
+  }
+
+  private fun starterDocuments(): List<ClinicalNoteEntity> =
     listOf(
       ClinicalNoteEntity(
-        title = "Cardiology Consult — Acute Dyspnea",
-        category = "Cardiology",
+        title = "The Art of Bilingual Reading & Clinical Precision",
+        category = "English Book",
         languageTag = "en-US",
         content =
           """
-          HISTORY OF PRESENT ILLNESS:
-          Dr. Alvarez evaluated a 64-year-old patient presenting with progressive exertional dyspnea over 4 days. Vitals on admission showed BP 148/92 mmHg, HR 96 BPM, and SpO2 93% on room air.
+          CHAPTER 1: FLUENCY THROUGH CONTEXT
+          Reading fluently in a second language means understanding idioms, rhythm, and subtle tone shifts rather than translating word by word. When you listen closely to natural stress patterns, complex medical and academic terms become effortless to pronounce.
 
-          LABORATORY & DIAGNOSTICS:
-          Serum creatinine was 1.3 mg/dL, BNP measured 640 pg/mL, and HbA1c was 7.2%. Twelve-lead ECG demonstrated sinus tachycardia without acute ST elevation.
+          CLINICAL COMMUNICATION EXAMPLE:
+          Dr. Patel reviewed the patient's chart carefully. Vitals remained stable at BP 124/78 mmHg and SpO2 98% on room air, while HbA1c improved to 6.8%.
 
-          ASSESSMENT & PLAN:
-          Initiate Furosemide 40 mg IV once daily and continue Metformin 500 mg b.i.d. Monitor electrolytes q.d. and recheck renal panel in 24 hours.
-
-          References:
-          [1] AHA/ACC Heart Failure Guidelines, 2024 Update.
+          PRACTICE SENTENCE FOR PRONUNCIATION:
+          People probably prefer practicing clear pronunciation patiently every morning before work.
           """
             .trimIndent(),
       ),
       ClinicalNoteEntity(
-        title = "تقرير سريري — متابعة السكري وضغط الدم",
-        category = "Endocrinology",
+        title = "رحلةُ الكلمةِ والعِلم — القراءةُ الفصيحةُ والتَّرجمةُ",
+        category = "Arabic Book",
         languageTag = "ar",
         content =
           """
-          مُلَخَّصُ الحَالَةِ السَّرِيرِيَّةِ:
-          حضر المريضُ البالغ من العمر 58 عاماً للمتابعة الدورية لمرض السكري من النوع الثاني وارتفاع ضغط الدم الشرياني. أظهر الفحص السريري ضغط دم 138/86 mmHg ومعدل نبض 78 نبضة في الدقيقة.
+          الفَصْلُ الأَوَّلُ: بَلَاغَةُ التَّعْبِيرِ وَوُضُوحُ النُّطْقِ
+          تُعَدُّ القِرَاءَةُ الجَهْرِيَّةُ المُنَظَّمَةُ مِنْ أَنْجَعِ الوَسَائِلِ لِإِتْقَانِ مَخَارِجِ الحُرُوفِ العَرَبِيَّةِ وَضَبْطِ الإِيقَاعِ الصَّوْتِيِّ. عِنْدَمَا نَرْبِطُ السِّيَاقَ المَعْرِفِيَّ بِالنُّطْقِ الصَّحِيحِ تَتَرَسَّخُ المُفْرَدَاتُ فِي الذَّاكِرَةِ طَوِيلَةِ الأَمَدِ.
 
-          التَّحَالِيلُ المَخْبَرِيَّةُ:
-          بلغت نسبة السكر التراكمي HbA1c 7.4%، ومستوى الكرياتينين 0.95 mg/dL، ومعدل الترشيح الكبيبي eGFR 84 mL/min.
-
-          الخُطَّةُ العِلَاجِيَّةُ:
-          الاستمرار على دواء Metformin 500 mg مرتين يومياً بعد الطعام، وإضافة Lisinopril 10 mg صباحاً مع مراقبة ضغط الدم في المنزل أسبوعياً.
-
-          المراجع:
-          [1] الدليل الإرشادي للجمعية الأمريكية للسكري 2025.
+          مِثَالٌ طِبِّيٌّ مُزْدَوَجُ اللُّغَةِ:
+          أَظْهَرَتْ نَتَائِجُ الفَحْصِ السَّرِيرِيِّ اسْتِقْرَارَ ضَغْطِ الدَّمِ عِنْدَ 128/82 mmHg وَانْخِفَاضَ مُعَدَّلِ HbA1c بَعْدَ الِالْتِزَامِ بِدَوَاءِ Metformin 500 mg يَوْمِيًّا.
           """
             .trimIndent(),
       ),
       ClinicalNoteEntity(
-        title = "Neurology Ward Round (UK)",
-        category = "Neurology",
-        languageTag = "en-GB",
-        content =
-          """
-          WARD SUMMARY:
-          The patient reports significant improvement in migraine frequency following prophylactic therapy. Full blood count confirmed normal haemoglobin with no evidence of anaemia or peripheral oedema.
-
-          MEDICATION REVIEW:
-          Continue Sumatriptan 50 mg p.r.n. at headache onset and Paracetamol 1 g every 6 hours if required. Follow up in neurology outpatients in 6 weeks.
-          """
-            .trimIndent(),
-      ),
-      ClinicalNoteEntity(
-        title = "Multilingual Clinical Rounds (FR / DE / ES)",
-        category = "Multilingual",
+        title = "Arabic ↔ English Accent Mastery Drills",
+        category = "Pronunciation",
         languageTag = "auto",
         content =
           """
-          Le patient présente une tension artérielle stable à 122/78 mmHg sans signe de détresse respiratoire. Le traitement par voie orale est bien toléré.
+          ENGLISH CONTRAST DRILLS (/p/ vs /b/, /v/ vs /f/, /θ/ vs /s/):
+          Please bring both heavy paper bags before five o'clock.
+          The very vivid voice verified thirty-three thoughtful theories.
 
-          Der Patient zeigt eine deutliche Besserung der Symptomatik nach der Physiotherapie und hat keine Nebenwirkungen unter der aktuellen Medikation.
-
-          El paciente refiere mejoría clínica progresiva y mantiene una saturación de oxígeno del 98% con respiración espontánea.
+          ARABIC ARTICULATION DRILLS (ع / غ / ح / خ / ق / ض):
+          عَلِمَ العَالِمُ حَقِيقَةَ القَرَارِ الصَّائِبِ فِي ضَوْءِ الخِبْرَةِ العَمِيقَةِ.
+          حَافِظْ عَلَى هُدُوءِ الصَّوْتِ وَوُضُوحِ المَخْرَجِ عِنْدَ قِرَاءَةِ النُّصُوصِ الطَّوِيلَةِ.
+          """
+            .trimIndent(),
+      ),
+      ClinicalNoteEntity(
+        title = "British Academic & Medical Digest (EN-GB)",
+        category = "Academic",
+        languageTag = "en-GB",
+        content =
+          """
+          EDITORIAL SUMMARY:
+          Research into bilingual cognition demonstrates that regular auditory exposure strengthens phonological awareness. Laboratory assessments showed normal haemoglobin levels with no signs of anaemia or peripheral oedema.
           """
             .trimIndent(),
       ),
@@ -223,50 +315,30 @@ class ClinNoteRepository(private val database: ClinNoteDatabase) {
 
   private fun starterPronunciationRules(): List<PronunciationRuleEntity> =
     listOf(
-      PronunciationRuleEntity(
-        term = "HbA1c",
-        spokenReplacement = "hemoglobin A 1 C",
-        languageTag = "en",
+      PronunciationRuleEntity(term = "HbA1c", spokenReplacement = "hemoglobin A 1 C", languageTag = "en"),
+      PronunciationRuleEntity(term = "SpO2", spokenReplacement = "oxygen saturation", languageTag = "en"),
+      PronunciationRuleEntity(term = "b.i.d.", spokenReplacement = "twice daily", languageTag = "en"),
+      PronunciationRuleEntity(term = "mmHg", spokenReplacement = "millimeters of mercury", languageTag = "en"),
+      PronunciationRuleEntity(term = "mg/dL", spokenReplacement = "milligrams per deciliter", languageTag = "en"),
+    )
+
+  private fun starterSavedPhrases(): List<SavedPhraseEntity> =
+    listOf(
+      SavedPhraseEntity(
+        phrase = "Break the ice",
+        translation = "كسرُ الحاجز أو بدءُ الحديث بلطف",
+        languageTag = "en-US",
+        pronunciationGuide = "/breɪk ði aɪs/",
+        notes = "Idiom: relieve tension in an initial meeting",
+        masteryLevel = 2,
       ),
-      PronunciationRuleEntity(
-        term = "SpO2",
-        spokenReplacement = "oxygen saturation",
-        languageTag = "en",
-      ),
-      PronunciationRuleEntity(
-        term = "eGFR",
-        spokenReplacement = "estimated G F R",
-        languageTag = "en",
-      ),
-      PronunciationRuleEntity(
-        term = "b.i.d.",
-        spokenReplacement = "twice daily",
-        languageTag = "en",
-      ),
-      PronunciationRuleEntity(
-        term = "t.i.d.",
-        spokenReplacement = "three times daily",
-        languageTag = "en",
-      ),
-      PronunciationRuleEntity(
-        term = "q.d.",
-        spokenReplacement = "once daily",
-        languageTag = "en",
-      ),
-      PronunciationRuleEntity(
-        term = "p.r.n.",
-        spokenReplacement = "as needed",
-        languageTag = "en",
-      ),
-      PronunciationRuleEntity(
-        term = "mmHg",
-        spokenReplacement = "millimeters of mercury",
-        languageTag = "en",
-      ),
-      PronunciationRuleEntity(
-        term = "mg/dL",
-        spokenReplacement = "milligrams per deciliter",
-        languageTag = "en",
+      SavedPhraseEntity(
+        phrase = "على قَدَمٍ وَسَاق",
+        translation = "In full swing / actively underway",
+        languageTag = "ar",
+        pronunciationGuide = "ʿalā qadamin wa-sāq",
+        notes = "Classical Arabic idiom for vigorous ongoing progress",
+        masteryLevel = 1,
       ),
     )
 }

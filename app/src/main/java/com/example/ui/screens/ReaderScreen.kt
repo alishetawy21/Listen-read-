@@ -21,21 +21,34 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.BookmarkAdd
 import androidx.compose.material.icons.rounded.FilterList
 import androidx.compose.material.icons.rounded.GraphicEq
+import androidx.compose.material.icons.rounded.Headphones
 import androidx.compose.material.icons.rounded.Language
 import androidx.compose.material.icons.rounded.MenuBook
+import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Repeat
+import androidx.compose.material.icons.rounded.SlowMotionVideo
+import androidx.compose.material.icons.rounded.Translate
+import androidx.compose.material.icons.rounded.VolumeUp
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.minimumInteractiveComponentSize
@@ -51,21 +64,35 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.model.ListenAudioMode
 import com.example.model.PlaybackStatus
 import com.example.model.ReaderSentence
 import com.example.model.ReaderSessionState
 import com.example.model.SupportedLanguages
+import com.example.model.VoiceGender
+import com.example.ui.InlineSentenceSheetState
 import com.example.ui.theme.NewsreaderFontFamily
 
-@OptIn(ExperimentalLayoutApi::class)
+@OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun ReaderScreen(
   state: ReaderSessionState,
+  preferredGender: VoiceGender,
+  inlineSheetState: InlineSentenceSheetState?,
   onJumpToSentence: (Int) -> Unit,
   onReadParagraph: (Int) -> Unit,
   onToggleSkipHeadings: () -> Unit,
   onToggleRepeat: () -> Unit,
   onBookmark: () -> Unit,
+  onSelectVolume: (Float) -> Unit,
+  onSelectGender: (VoiceGender) -> Unit,
+  onSelectListenAudioMode: (ListenAudioMode) -> Unit,
+  onOpenSentenceAssist: (String, String) -> Unit,
+  onExplainSheetPassage: () -> Unit,
+  onDismissSentenceAssist: () -> Unit,
+  onSpeakTextSlowly: (String, String) -> Unit,
+  onPracticeInCoach: (String, String) -> Unit,
+  onSavePhrase: (String, String, String, String) -> Unit,
   onNavigateToLibrary: () -> Unit,
   modifier: Modifier = Modifier,
 ) {
@@ -82,15 +109,15 @@ fun ReaderScreen(
         modifier = Modifier.size(56.dp),
       )
       Spacer(Modifier.height(14.dp))
-      Text("Smart Reader Ready", style = MaterialTheme.typography.headlineMedium)
+      Text("Smart Book & PDF Reader", style = MaterialTheme.typography.headlineMedium)
       Spacer(Modifier.height(8.dp))
       Text(
-        "Open any clinical note, PDF, scanned OCR document, or highlight text in another app and select 'Read with ClinNote'.",
+        "Open any PDF, EPUB, TXT book, scanned OCR page, or select text in another app and tap 'LinguaFloat: Read / Translate'.",
         style = MaterialTheme.typography.bodyMedium,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
       )
       Spacer(Modifier.height(18.dp))
-      Button(onClick = onNavigateToLibrary) { Text("Browse Documents") }
+      Button(onClick = onNavigateToLibrary) { Text("Browse Books & PDFs") }
     }
     return
   }
@@ -195,9 +222,48 @@ fun ReaderScreen(
               leadingIcon = {
                 Icon(Icons.Rounded.FilterList, contentDescription = null, modifier = Modifier.size(16.dp))
               },
-              label = { Text("Skip Headings/Refs") },
+              label = { Text("Skip Headings") },
               modifier = Modifier.testTag("skip_headings_chip"),
             )
+            ListenAudioMode.entries.forEach { mode ->
+              FilterChip(
+                selected = state.listenAudioMode == mode,
+                onClick = { onSelectListenAudioMode(mode) },
+                leadingIcon = {
+                  Icon(Icons.Rounded.Headphones, contentDescription = null, modifier = Modifier.size(15.dp))
+                },
+                label = { Text("Listen: ${mode.label}") },
+              )
+            }
+          }
+
+          Spacer(Modifier.height(8.dp))
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+          ) {
+            Icon(
+              Icons.Rounded.VolumeUp,
+              contentDescription = "Volume",
+              modifier = Modifier.size(18.dp),
+              tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.width(8.dp))
+            Slider(
+              value = state.speechVolume,
+              onValueChange = onSelectVolume,
+              valueRange = 0.1f..1.0f,
+              modifier = Modifier.weight(1f),
+            )
+            Spacer(Modifier.width(8.dp))
+            VoiceGender.entries.forEach { gender ->
+              FilterChip(
+                selected = preferredGender == gender,
+                onClick = { onSelectGender(gender) },
+                label = { Text(gender.label) },
+                modifier = Modifier.padding(start = 4.dp),
+              )
+            }
           }
 
           if (!state.statusMessage.isNullOrBlank()) {
@@ -220,7 +286,7 @@ fun ReaderScreen(
       }
     }
 
-    // Sentences grouped visually with paragraph markers & live highlight
+    // Sentences grouped visually with paragraph markers, live highlight & inline AI assist actions
     itemsIndexed(state.sentences, key = { _, s -> s.index }) { idx, sentence ->
       val prevParagraph = state.sentences.getOrNull(idx - 1)?.paragraphIndex
       val isParagraphStart = prevParagraph != sentence.paragraphIndex
@@ -233,12 +299,141 @@ fun ReaderScreen(
         isSkipped = isSkipped,
         isParagraphStart = isParagraphStart,
         isSpeaking = isActive && state.status == PlaybackStatus.PLAYING,
-        onTapSentence = { onJumpToSentence(sentence.index) },
+        onTapSentence = {
+          onJumpToSentence(sentence.index)
+          if (state.listenAudioMode == ListenAudioMode.TRANSLATED) {
+            onOpenSentenceAssist(sentence.rawText, sentence.detectedLanguageTag)
+          }
+        },
         onTapParagraph = { onReadParagraph(sentence.paragraphIndex) },
+        onTapTranslateSentence = {
+          onOpenSentenceAssist(sentence.rawText, sentence.detectedLanguageTag)
+        },
+        onTapPracticeSentence = {
+          onPracticeInCoach(sentence.rawText, sentence.detectedLanguageTag)
+        },
       )
     }
 
     item { Spacer(Modifier.height(88.dp)) }
+  }
+
+  if (inlineSheetState != null) {
+    ModalBottomSheet(onDismissRequest = onDismissSentenceAssist) {
+      Column(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+      ) {
+        Text("Sentence Translation & Coach", style = MaterialTheme.typography.titleLarge)
+        Text(
+          text = inlineSheetState.sentenceText,
+          style = MaterialTheme.typography.bodyLarge,
+          fontWeight = FontWeight.Medium,
+        )
+
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+          FilledTonalButton(
+            onClick = { onSpeakTextSlowly(inlineSheetState.sentenceText, inlineSheetState.sentenceLang) }
+          ) {
+            Icon(Icons.Rounded.SlowMotionVideo, contentDescription = null, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(6.dp))
+            Text("Pronounce 0.75x")
+          }
+          OutlinedButton(
+            onClick = {
+              onDismissSentenceAssist()
+              onPracticeInCoach(inlineSheetState.sentenceText, inlineSheetState.sentenceLang)
+            }
+          ) {
+            Icon(Icons.Rounded.Mic, contentDescription = null, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(6.dp))
+            Text("Practice")
+          }
+        }
+
+        HorizontalDivider()
+
+        if (inlineSheetState.isLoading) {
+          Row(verticalAlignment = Alignment.CenterVertically) {
+            CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+            Spacer(Modifier.width(10.dp))
+            Text("Fetching contextual Arabic ↔ English insight...", style = MaterialTheme.typography.bodyMedium)
+          }
+        }
+
+        if (!inlineSheetState.errorMessage.isNullOrBlank()) {
+          Text(
+            text = inlineSheetState.errorMessage,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.error,
+          )
+        }
+
+        inlineSheetState.translation?.let { tr ->
+          Surface(
+            shape = RoundedCornerShape(14.dp),
+            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f),
+            modifier = Modifier.fillMaxWidth(),
+          ) {
+            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+              Text(
+                text = tr.translatedText,
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onPrimaryContainer,
+              )
+              if (tr.literalVsContextualNote.isNotBlank()) {
+                Text(
+                  text = tr.literalVsContextualNote,
+                  style = MaterialTheme.typography.bodySmall,
+                  color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+              }
+              Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilledTonalButton(
+                  onClick = { onSpeakTextSlowly(tr.translatedText, tr.targetLanguage) }
+                ) {
+                  Text("Listen Translation")
+                }
+                OutlinedButton(
+                  onClick = {
+                    onSavePhrase(
+                      tr.sourceText,
+                      tr.translatedText,
+                      inlineSheetState.sentenceLang,
+                      tr.vocabularyBreakdown.firstOrNull()?.pronunciationGuide.orEmpty(),
+                    )
+                  }
+                ) {
+                  Text("Save Phrase")
+                }
+              }
+            }
+          }
+        }
+
+        if (inlineSheetState.explanation != null) {
+          Surface(
+            shape = RoundedCornerShape(14.dp),
+            color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.55f),
+            modifier = Modifier.fillMaxWidth(),
+          ) {
+            Text(
+              text = inlineSheetState.explanation,
+              style = MaterialTheme.typography.bodyMedium,
+              modifier = Modifier.padding(14.dp),
+            )
+          }
+        } else if (!inlineSheetState.isLoading) {
+          OutlinedButton(onClick = onExplainSheetPassage, modifier = Modifier.fillMaxWidth()) {
+            Icon(Icons.Rounded.AutoAwesome, contentDescription = null, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(6.dp))
+            Text("Explain Grammar, Idioms & Pronunciation")
+          }
+        }
+
+        Spacer(Modifier.height(16.dp))
+      }
+    }
   }
 }
 
@@ -251,6 +446,8 @@ private fun SentenceReaderRow(
   isSpeaking: Boolean,
   onTapSentence: () -> Unit,
   onTapParagraph: () -> Unit,
+  onTapTranslateSentence: () -> Unit,
+  onTapPracticeSentence: () -> Unit,
 ) {
   val containerColor by
     animateColorAsState(
@@ -315,7 +512,7 @@ private fun SentenceReaderRow(
           .testTag("reader_sentence_${sentence.index}"),
     ) {
       CompositionLocalProvider(LocalLayoutDirection provides layoutDir) {
-        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp)) {
+        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp)) {
           Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -326,7 +523,7 @@ private fun SentenceReaderRow(
                 buildString {
                   append("#${sentence.index + 1} · ${sentence.detectedLanguageTag.uppercase()}")
                   if (sentence.segments.size > 1) append(" · MIXED")
-                  if (sentence.isHeadingOrReference) append(" · HEADING/REF")
+                  if (sentence.isHeadingOrReference) append(" · HEADING")
                   if (isSkipped) append(" (SKIPPED)")
                 },
               style = MaterialTheme.typography.labelSmall,
@@ -334,13 +531,37 @@ private fun SentenceReaderRow(
                 if (isActive) MaterialTheme.colorScheme.onTertiaryContainer
                 else MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            if (isSpeaking) {
-              Icon(
-                Icons.Rounded.GraphicEq,
-                contentDescription = "Currently speaking",
-                tint = MaterialTheme.colorScheme.tertiary,
-                modifier = Modifier.size(16.dp),
-              )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+              if (isSpeaking) {
+                Icon(
+                  Icons.Rounded.GraphicEq,
+                  contentDescription = "Currently speaking",
+                  tint = MaterialTheme.colorScheme.tertiary,
+                  modifier = Modifier.size(16.dp),
+                )
+              }
+              IconButton(
+                onClick = onTapTranslateSentence,
+                modifier = Modifier.size(32.dp),
+              ) {
+                Icon(
+                  Icons.Rounded.Translate,
+                  contentDescription = "Translate & explain sentence",
+                  tint = MaterialTheme.colorScheme.secondary,
+                  modifier = Modifier.size(17.dp),
+                )
+              }
+              IconButton(
+                onClick = onTapPracticeSentence,
+                modifier = Modifier.size(32.dp),
+              ) {
+                Icon(
+                  Icons.Rounded.Mic,
+                  contentDescription = "Practice speaking sentence",
+                  tint = MaterialTheme.colorScheme.primary,
+                  modifier = Modifier.size(17.dp),
+                )
+              }
             }
           }
 

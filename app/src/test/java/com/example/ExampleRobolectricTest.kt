@@ -10,10 +10,16 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.test.core.app.ApplicationProvider
 import com.example.capture.ClinNoteAccessibilityService
 import com.example.capture.ProcessTextActivity
+import com.example.coach.SpeechCoachManager
 import com.example.model.PLAYBACK_SPEED_PRESETS
-import com.example.ui.screens.LibraryScreen
 import com.example.model.ReaderSettings
-import com.example.ui.theme.ClinNoteTheme
+import com.example.model.TranslationTone
+import com.example.ui.TranslationUiState
+import com.example.ui.screens.HomeScreen
+import com.example.ui.screens.LibraryScreen
+import com.example.ui.screens.TranslationScreen
+import com.example.ui.theme.LinguaFloatTheme
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -32,10 +38,10 @@ class ExampleRobolectricTest {
   @get:Rule val composeTestRule = createComposeRule()
 
   @Test
-  fun `app name matches ClinNote`() {
+  fun `app name and process text label match LinguaFloat`() {
     val context = ApplicationProvider.getApplicationContext<Context>()
-    assertEquals("ClinNote", context.getString(R.string.app_name))
-    assertEquals("Read with ClinNote", context.getString(R.string.process_text_label))
+    assertEquals("LinguaFloat", context.getString(R.string.app_name))
+    assertEquals("LinguaFloat: Read / Translate", context.getString(R.string.process_text_label))
   }
 
   @Test
@@ -60,11 +66,11 @@ class ExampleRobolectricTest {
     val normalNode =
       AccessibilityNodeInfo.obtain().apply {
         isPassword = false
-        text = "Clinical discharge note ready for reading."
-        setTextSelection(0, 8)
+        text = "Bilingual Arabic and English reading passage."
+        setTextSelection(0, 9)
       }
     assertFalse(ClinNoteAccessibilityService.isSensitiveNode(normalNode))
-    assertEquals("Clinical", ClinNoteAccessibilityService.extractSelectedSubstring(normalNode))
+    assertEquals("Bilingual", ClinNoteAccessibilityService.extractSelectedSubstring(normalNode))
     normalNode.recycle()
   }
 
@@ -72,29 +78,123 @@ class ExampleRobolectricTest {
   fun `ProcessTextActivity loads selected text into SpeechCoordinator`() {
     val intent =
       Intent(Intent.ACTION_PROCESS_TEXT).apply {
-        putExtra(Intent.EXTRA_PROCESS_TEXT, "SpO2 is 97% on room air. Patient resting comfortably.")
+        putExtra(Intent.EXTRA_PROCESS_TEXT, "Please pronounce this clearly. Second sentence follows.")
       }
     val controller = Robolectric.buildActivity(ProcessTextActivity::class.java, intent).setup()
     val state = ClinNoteApplication.instance.speechCoordinator.sessionState.value
     assertTrue(state.hasContent)
     assertEquals(2, state.sentences.size)
-    assertTrue(state.rawText.contains("SpO2 is 97%"))
+    assertTrue(state.rawText.contains("Please pronounce this clearly"))
     controller.pause().stop().destroy()
   }
 
   @Test
-  fun `Repository seeds multilingual notes and pronunciation rules`() = runBlocking {
-    val app = ClinNoteApplication.instance
-    app.repository.seedInitialDataIfEmpty()
-    val rules = app.repository.getEnabledPronunciationRules()
-    assertTrue(rules.any { it.term == "HbA1c" })
-    assertTrue(rules.any { it.term == "mmHg" })
+  fun `SpeechCoachManager computes accurate verified word accuracy and WPM for English and Arabic`() {
+    val enMetrics =
+      SpeechCoachManager.computeVerifiedMetrics(
+        targetSentence = "Please bring both heavy paper bags.",
+        recognizedTranscript = "Please bring heavy paper bags",
+        durationMs = 3_000L,
+      )
+    assertEquals(5, enMetrics.matchedWordCount)
+    assertEquals(6, enMetrics.totalTargetWords)
+    assertEquals(83, enMetrics.wordAccuracyPct)
+    assertTrue(enMetrics.measuredWpm >= 80)
+
+    val arMetrics =
+      SpeechCoachManager.computeVerifiedMetrics(
+        targetSentence = "عَلِمَ العَالِمُ حَقِيقَةَ القَرَارِ",
+        recognizedTranscript = "علم العالم حقيقة القرار",
+        durationMs = 2_400L,
+      )
+    assertEquals(100, arMetrics.wordAccuracyPct)
   }
 
   @Test
-  fun `LibraryScreen renders core ClinNote actions`() {
+  fun `Repository persists documents, reading resume index, saved phrases, translations, and coach attempts`() =
+    runBlocking {
+      val app = ClinNoteApplication.instance
+      app.repository.seedInitialDataIfEmpty()
+
+      val docId =
+        app.repository.saveNote(
+          title = "Bilingual Test Book",
+          content = "First sentence. Second sentence. Third sentence.",
+          category = "EPUB Book",
+        )
+      app.repository.updateDocumentReadingProgress(docId, 2)
+      val loadedDoc = app.repository.getNoteById(docId)
+      assertEquals(2, loadedDoc?.lastSentenceIndex)
+
+      app.repository.savePhrase(
+        phrase = "Break the ice",
+        translation = "كسر الحاجز",
+        languageTag = "en-US",
+      )
+      val phrases = app.repository.savedPhrasesFlow.first()
+      assertTrue(phrases.any { it.phrase == "Break the ice" })
+
+      app.repository.recordTranslation(
+        sourceText = "Good morning",
+        translatedText = "صباح الخير",
+        sourceLanguage = "en-US",
+        targetLanguage = "ar",
+        tone = "Natural",
+        contextualNote = "Standard greeting",
+      )
+      val translations = app.repository.translationsFlow.first()
+      assertTrue(translations.any { it.translatedText == "صباح الخير" })
+
+      app.repository.savePronunciationAttempt(
+        targetSentence = "Test sentence",
+        recognizedTranscript = "Test sentence",
+        targetLanguage = "en-US",
+        overallScore = 92,
+        verifiedAccuracyPct = 100,
+        measuredWpm = 110,
+        audioAnalyzed = true,
+        coachingSummary = "Clear delivery",
+        recordingFilePath = null,
+      )
+      val attempts = app.repository.pronunciationAttemptsFlow.first()
+      assertTrue(attempts.any { it.overallScore == 92 })
+    }
+
+  @Test
+  fun `HomeScreen renders LinguaFloat Studio and key hubs`() {
     composeTestRule.setContent {
-      ClinNoteTheme {
+      LinguaFloatTheme {
+        HomeScreen(
+          settings = ReaderSettings(),
+          notes = emptyList(),
+          savedPhrases = emptyList(),
+          attempts = emptyList(),
+          translations = emptyList(),
+          onToggleFloatingShortcut = {},
+          onResumeDocument = {},
+          onOpenLibrary = {},
+          onOpenReader = {},
+          onOpenTranslation = {},
+          onOpenCoach = {},
+          onOpenPractice = {},
+          onOpenVocabulary = {},
+          onOpenProgress = {},
+          onOpenFloatingSettings = {},
+          onOpenStudio = {},
+          onOpenSettings = {},
+        )
+      }
+    }
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithText("LinguaFloat Studio").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("home_quick_translate").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("home_quick_coach").assertIsDisplayed()
+  }
+
+  @Test
+  fun `LibraryScreen renders LinguaFloat PDF EPUB OCR actions`() {
+    composeTestRule.setContent {
+      LinguaFloatTheme {
         LibraryScreen(
           notes = emptyList(),
           settings = ReaderSettings(),
@@ -113,10 +213,39 @@ class ExampleRobolectricTest {
       }
     }
     composeTestRule.waitForIdle()
-    composeTestRule.onNodeWithText("ClinNote Workspace").assertIsDisplayed()
+    composeTestRule.onNodeWithText("Smart Book & PDF Library").assertIsDisplayed()
     composeTestRule.onNodeWithTag("new_note_button").assertIsDisplayed()
     composeTestRule.onNodeWithTag("import_pdf_button").assertIsDisplayed()
     composeTestRule.onNodeWithTag("scan_image_ocr_button").assertIsDisplayed()
-    composeTestRule.onNodeWithTag("quick_paste_read_button").assertIsDisplayed()
+  }
+
+  @Test
+  fun `TranslationScreen renders input, language swap, and translate button`() {
+    composeTestRule.setContent {
+      LinguaFloatTheme {
+        TranslationScreen(
+          inputText = "Knowledge is light",
+          sourceLang = "en-US",
+          targetLang = "ar",
+          tone = TranslationTone.NATURAL,
+          uiState = TranslationUiState.Idle,
+          history = emptyList(),
+          onInputChange = {},
+          onSelectLanguages = { _, _ -> },
+          onSwapLanguages = {},
+          onSelectTone = {},
+          onTranslate = {},
+          onListenText = { _, _ -> },
+          onPracticeInCoach = { _, _ -> },
+          onSavePhrase = { _, _, _, _, _ -> },
+          onDeleteHistoryItem = {},
+          onClearHistory = {},
+        )
+      }
+    }
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithTag("translation_input").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("translation_swap_button").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("translate_submit_button").assertIsDisplayed()
   }
 }

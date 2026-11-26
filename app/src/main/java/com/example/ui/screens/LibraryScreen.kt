@@ -25,6 +25,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.ContentPaste
@@ -38,9 +39,11 @@ import androidx.compose.material.icons.rounded.RecordVoiceOver
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
@@ -51,6 +54,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -72,13 +76,14 @@ import com.example.R
 import com.example.data.ClinicalNoteEntity
 import com.example.model.ReaderSettings
 
-@OptIn(ExperimentalLayoutApi::class)
+@OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun LibraryScreen(
   notes: List<ClinicalNoteEntity>,
   settings: ReaderSettings,
   isImporting: Boolean,
   importBanner: String?,
+  onBack: (() -> Unit)? = null,
   onDismissImportBanner: () -> Unit,
   onOpenNote: (ClinicalNoteEntity, Boolean) -> Unit,
   onSaveNote: (Long?, String, String, String, String) -> Unit,
@@ -95,7 +100,7 @@ fun LibraryScreen(
   var showNoteEditor by remember { mutableStateOf(false) }
   var showPasteReaderDialog by remember { mutableStateOf(false) }
 
-  val pdfPickerLauncher =
+  val docPickerLauncher =
     rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
       if (uri != null) onImportDocumentUri(uri)
     }
@@ -108,7 +113,7 @@ fun LibraryScreen(
   val filteredNotes =
     remember(notes, selectedFilter) {
       when (selectedFilter) {
-        "Notes" -> notes.filter { it.sourceType == "INTERNAL_NOTE" }
+        "Books & Notes" -> notes.filter { it.sourceType == "INTERNAL_NOTE" || it.sourceType == "EPUB_BOOK" }
         "PDF & OCR" -> notes.filter { it.sourceType.contains("PDF") || it.isOcrExtracted }
         "Arabic / Multi" ->
           notes.filter {
@@ -118,280 +123,290 @@ fun LibraryScreen(
       }
     }
 
-  LazyColumn(
-    modifier = modifier.fillMaxSize(),
-    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 14.dp),
-    verticalArrangement = Arrangement.spacedBy(12.dp),
-  ) {
-    // Hero Workspace Banner
-    item {
-      Card(
-        shape = RoundedCornerShape(22.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primary),
-        modifier = Modifier.fillMaxWidth(),
-      ) {
-        Box(modifier = Modifier.fillMaxWidth()) {
-          Image(
-            painter = painterResource(id = R.drawable.img_reader_hero),
-            contentDescription = "ClinNote clinical acoustic workspace banner",
-            contentScale = ContentScale.Crop,
-            alpha = 0.28f,
-            modifier = Modifier.matchParentSize(),
-          )
-          Box(
-            modifier =
-              Modifier.matchParentSize()
-                .background(
-                  Brush.horizontalGradient(
-                    listOf(
-                      MaterialTheme.colorScheme.primary.copy(alpha = 0.92f),
-                      MaterialTheme.colorScheme.primary.copy(alpha = 0.68f),
+  Column(modifier = modifier.fillMaxSize()) {
+    if (onBack != null) {
+      TopAppBar(
+        title = { Text("Books, PDFs & Documents") },
+        navigationIcon = {
+          IconButton(onClick = onBack) {
+            Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
+          }
+        },
+      )
+    }
+
+    LazyColumn(
+      modifier = Modifier.fillMaxSize(),
+      contentPadding = PaddingValues(horizontal = 16.dp, vertical = 14.dp),
+      verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+      item {
+        Card(
+          shape = RoundedCornerShape(22.dp),
+          colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primary),
+          modifier = Modifier.fillMaxWidth(),
+        ) {
+          Box(modifier = Modifier.fillMaxWidth()) {
+            Image(
+              painter = painterResource(id = R.drawable.img_reader_hero),
+              contentDescription = "LinguaFloat smart book and PDF library banner",
+              contentScale = ContentScale.Crop,
+              alpha = 0.28f,
+              modifier = Modifier.matchParentSize(),
+            )
+            Box(
+              modifier =
+                Modifier.matchParentSize()
+                  .background(
+                    Brush.horizontalGradient(
+                      listOf(
+                        MaterialTheme.colorScheme.primary.copy(alpha = 0.92f),
+                        MaterialTheme.colorScheme.primary.copy(alpha = 0.68f),
+                      )
                     )
                   )
-                )
-          )
-          Column(modifier = Modifier.fillMaxWidth().padding(18.dp)) {
-            Row(
-              modifier = Modifier.fillMaxWidth(),
-              horizontalArrangement = Arrangement.SpaceBetween,
-              verticalAlignment = Alignment.CenterVertically,
-            ) {
-              Surface(
-                color = Color.White.copy(alpha = 0.16f),
-                shape = RoundedCornerShape(12.dp),
+            )
+            Column(modifier = Modifier.fillMaxWidth().padding(18.dp)) {
+              Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
               ) {
-                Row(
-                  modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
-                  verticalAlignment = Alignment.CenterVertically,
+                Surface(
+                  color = Color.White.copy(alpha = 0.16f),
+                  shape = RoundedCornerShape(12.dp),
                 ) {
-                  Icon(
-                    imageVector = Icons.Rounded.RecordVoiceOver,
-                    contentDescription = null,
-                    tint = Color.White,
-                    modifier = Modifier.size(15.dp),
-                  )
-                  Spacer(Modifier.width(6.dp))
+                  Row(
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                  ) {
+                    Icon(
+                      imageVector = Icons.Rounded.RecordVoiceOver,
+                      contentDescription = null,
+                      tint = Color.White,
+                      modifier = Modifier.size(15.dp),
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                      text = "PDF · EPUB · TXT · OCR",
+                      style = MaterialTheme.typography.labelSmall,
+                      color = Color.White,
+                      fontWeight = FontWeight.Bold,
+                    )
+                  }
+                }
+
+                Surface(
+                  modifier =
+                    Modifier.clip(RoundedCornerShape(12.dp))
+                      .clickable { onToggleFloatingShortcut(!settings.floatingShortcutEnabled) }
+                      .testTag("hero_floating_toggle"),
+                  color =
+                    if (settings.floatingShortcutEnabled) MaterialTheme.colorScheme.tertiary
+                    else Color.White.copy(alpha = 0.20f),
+                ) {
                   Text(
-                    text = "UNIVERSAL SMART READER",
-                    style = MaterialTheme.typography.labelSmall,
+                    text = if (settings.floatingShortcutEnabled) "Shortcut ON" else "Enable Shortcut",
+                    style = MaterialTheme.typography.labelLarge,
                     color = Color.White,
-                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
                   )
                 }
               }
 
-              Surface(
-                modifier =
-                  Modifier.clip(RoundedCornerShape(12.dp))
-                    .clickable { onToggleFloatingShortcut(!settings.floatingShortcutEnabled) }
-                    .testTag("hero_floating_toggle"),
-                color =
-                  if (settings.floatingShortcutEnabled) MaterialTheme.colorScheme.tertiary
-                  else Color.White.copy(alpha = 0.20f),
-              ) {
-                Text(
-                  text =
-                    if (settings.floatingShortcutEnabled) "Shortcut ON" else "Enable Shortcut",
-                  style = MaterialTheme.typography.labelLarge,
-                  color = Color.White,
-                  modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                )
-              }
-            }
-
-            Spacer(Modifier.height(12.dp))
-            Text(
-              text = "ClinNote Workspace",
-              style = MaterialTheme.typography.headlineMedium,
-              color = Color.White,
-            )
-            Spacer(Modifier.height(4.dp))
-            Text(
-              text =
-                "Read clinical notes, PDFs, scanned OCR documents, or selected text from Chrome & other apps in 13+ languages.",
-              style = MaterialTheme.typography.bodyMedium,
-              color = Color.White.copy(alpha = 0.9f),
-            )
-            Spacer(Modifier.height(12.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-              FilledTonalButton(
-                onClick = { showPasteReaderDialog = true },
-                modifier = Modifier.testTag("quick_paste_read_button"),
-              ) {
-                Icon(Icons.Rounded.ContentPaste, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(6.dp))
-                Text("Paste & Read")
-              }
-              OutlinedButton(
-                onClick = onOpenSettings,
-                colors =
-                  androidx.compose.material3.ButtonDefaults.outlinedButtonColors(
-                    contentColor = Color.White
-                  ),
-              ) {
-                Text("System Capture")
+              Spacer(Modifier.height(10.dp))
+              Text(
+                text = "Smart Book & PDF Library",
+                style = MaterialTheme.typography.headlineSmall,
+                color = Color.White,
+              )
+              Spacer(Modifier.height(4.dp))
+              Text(
+                text =
+                  "Open local PDF, EPUB, or TXT books, run Arabic/English OCR on scanned pages, and resume right where you left off.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = Color.White.copy(alpha = 0.9f),
+              )
+              Spacer(Modifier.height(12.dp))
+              Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilledTonalButton(
+                  onClick = { showPasteReaderDialog = true },
+                  modifier = Modifier.testTag("quick_paste_read_button"),
+                ) {
+                  Icon(Icons.Rounded.ContentPaste, contentDescription = null, modifier = Modifier.size(18.dp))
+                  Spacer(Modifier.width(6.dp))
+                  Text("Paste & Read")
+                }
+                OutlinedButton(
+                  onClick = onOpenSettings,
+                  colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White),
+                ) {
+                  Text("Floating Setup")
+                }
               }
             }
           }
         }
       }
-    }
 
-    // Import & Create Action Strip
-    item {
-      FlowRow(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-      ) {
-        Button(
-          onClick = {
-            editingNote = null
-            showNoteEditor = true
-          },
-          modifier = Modifier.testTag("new_note_button"),
+      item {
+        FlowRow(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.spacedBy(8.dp),
+          verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-          Icon(Icons.Rounded.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-          Spacer(Modifier.width(6.dp))
-          Text("New Note")
-        }
+          Button(
+            onClick = {
+              editingNote = null
+              showNoteEditor = true
+            },
+            modifier = Modifier.testTag("new_note_button"),
+          ) {
+            Icon(Icons.Rounded.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(6.dp))
+            Text("Add Text")
+          }
 
-        FilledTonalButton(
-          onClick = {
-            pdfPickerLauncher.launch(arrayOf("application/pdf", "text/plain"))
-          },
-          modifier = Modifier.testTag("import_pdf_button"),
-        ) {
-          Icon(Icons.Rounded.PictureAsPdf, contentDescription = null, modifier = Modifier.size(18.dp))
-          Spacer(Modifier.width(6.dp))
-          Text("Import PDF / Txt")
-        }
+          FilledTonalButton(
+            onClick = {
+              docPickerLauncher.launch(
+                arrayOf("application/pdf", "application/epub+zip", "text/plain")
+              )
+            },
+            modifier = Modifier.testTag("import_pdf_button"),
+          ) {
+            Icon(Icons.Rounded.PictureAsPdf, contentDescription = null, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(6.dp))
+            Text("Import PDF / EPUB / TXT")
+          }
 
-        FilledTonalButton(
-          onClick = {
-            photoPickerLauncher.launch(
-              PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-            )
-          },
-          modifier = Modifier.testTag("scan_image_ocr_button"),
-        ) {
-          Icon(Icons.Rounded.DocumentScanner, contentDescription = null, modifier = Modifier.size(18.dp))
-          Spacer(Modifier.width(6.dp))
-          Text("Scan Image OCR")
+          FilledTonalButton(
+            onClick = {
+              photoPickerLauncher.launch(
+                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+              )
+            },
+            modifier = Modifier.testTag("scan_image_ocr_button"),
+          ) {
+            Icon(Icons.Rounded.DocumentScanner, contentDescription = null, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(6.dp))
+            Text("Scan Page OCR")
+          }
         }
       }
-    }
 
-    if (isImporting) {
-      item {
-        Surface(
-          shape = RoundedCornerShape(14.dp),
-          color = MaterialTheme.colorScheme.secondaryContainer,
-          modifier = Modifier.fillMaxWidth(),
-        ) {
-          Row(
-            modifier = Modifier.padding(14.dp),
-            verticalAlignment = Alignment.CenterVertically,
+      if (isImporting) {
+        item {
+          Surface(
+            shape = RoundedCornerShape(14.dp),
+            color = MaterialTheme.colorScheme.secondaryContainer,
+            modifier = Modifier.fillMaxWidth(),
           ) {
-            CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.5.dp)
-            Spacer(Modifier.width(12.dp))
-            Text(
-              "Extracting text & running on-device OCR if scanned...",
-              style = MaterialTheme.typography.bodyMedium,
+            Row(
+              modifier = Modifier.padding(14.dp),
+              verticalAlignment = Alignment.CenterVertically,
+            ) {
+              CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.5.dp)
+              Spacer(Modifier.width(12.dp))
+              Text(
+                "Extracting text & running Arabic/English OCR if needed...",
+                style = MaterialTheme.typography.bodyMedium,
+              )
+            }
+          }
+        }
+      }
+
+      if (!importBanner.isNullOrBlank()) {
+        item {
+          Surface(
+            shape = RoundedCornerShape(14.dp),
+            color = MaterialTheme.colorScheme.tertiaryContainer,
+            modifier = Modifier.fillMaxWidth(),
+          ) {
+            Row(
+              modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+              verticalAlignment = Alignment.CenterVertically,
+            ) {
+              Icon(
+                Icons.Rounded.AutoAwesome,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onTertiaryContainer,
+                modifier = Modifier.size(18.dp),
+              )
+              Spacer(Modifier.width(10.dp))
+              Text(
+                text = importBanner,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onTertiaryContainer,
+                modifier = Modifier.weight(1f),
+              )
+              TextButton(onClick = onDismissImportBanner) { Text("OK") }
+            }
+          }
+        }
+      }
+
+      item {
+        FlowRow(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.spacedBy(8.dp),
+          verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+          listOf("All", "Books & Notes", "PDF & OCR", "Arabic / Multi").forEach { filter ->
+            FilterChip(
+              selected = selectedFilter == filter,
+              onClick = { selectedFilter = filter },
+              label = { Text(filter) },
             )
           }
         }
       }
-    }
 
-    if (!importBanner.isNullOrBlank()) {
-      item {
-        Surface(
-          shape = RoundedCornerShape(14.dp),
-          color = MaterialTheme.colorScheme.tertiaryContainer,
-          modifier = Modifier.fillMaxWidth(),
-        ) {
-          Row(
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
+      if (filteredNotes.isEmpty()) {
+        item {
+          Card(
+            shape = RoundedCornerShape(18.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+            modifier = Modifier.fillMaxWidth(),
           ) {
-            Icon(
-              Icons.Rounded.AutoAwesome,
-              contentDescription = null,
-              tint = MaterialTheme.colorScheme.onTertiaryContainer,
-              modifier = Modifier.size(18.dp),
-            )
-            Spacer(Modifier.width(10.dp))
-            Text(
-              text = importBanner,
-              style = MaterialTheme.typography.bodyMedium,
-              color = MaterialTheme.colorScheme.onTertiaryContainer,
-              modifier = Modifier.weight(1f),
-            )
-            TextButton(onClick = onDismissImportBanner) { Text("OK") }
+            Column(
+              modifier = Modifier.fillMaxWidth().padding(24.dp),
+              horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+              Icon(
+                Icons.Rounded.Description,
+                contentDescription = null,
+                modifier = Modifier.size(40.dp),
+                tint = MaterialTheme.colorScheme.primary,
+              )
+              Spacer(Modifier.height(10.dp))
+              Text("No documents in this filter", style = MaterialTheme.typography.titleMedium)
+              Spacer(Modifier.height(4.dp))
+              Text(
+                "Add text, import a PDF/EPUB/TXT book, or scan a page image to begin.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+              )
+            }
           }
         }
-      }
-    }
-
-    // Filter Chips
-    item {
-      Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-      ) {
-        listOf("All", "Notes", "PDF & OCR", "Arabic / Multi").forEach { filter ->
-          FilterChip(
-            selected = selectedFilter == filter,
-            onClick = { selectedFilter = filter },
-            label = { Text(filter) },
+      } else {
+        items(filteredNotes, key = { it.id }) { note ->
+          LibraryDocumentCard(
+            note = note,
+            onOpen = { onOpenNote(note, false) },
+            onListenNow = { onOpenNote(note, true) },
+            onEdit = {
+              editingNote = note
+              showNoteEditor = true
+            },
+            onDelete = { onDeleteNote(note.id) },
           )
         }
       }
-    }
 
-    // Notes & Documents List
-    if (filteredNotes.isEmpty()) {
-      item {
-        Card(
-          shape = RoundedCornerShape(18.dp),
-          colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-          modifier = Modifier.fillMaxWidth(),
-        ) {
-          Column(
-            modifier = Modifier.fillMaxWidth().padding(24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-          ) {
-            Icon(
-              Icons.Rounded.Description,
-              contentDescription = null,
-              modifier = Modifier.size(40.dp),
-              tint = MaterialTheme.colorScheme.primary,
-            )
-            Spacer(Modifier.height(10.dp))
-            Text("No documents in this filter", style = MaterialTheme.typography.titleMedium)
-            Spacer(Modifier.height(4.dp))
-            Text(
-              "Create a clinical note, import a PDF, or scan a document image to begin.",
-              style = MaterialTheme.typography.bodyMedium,
-              color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-          }
-        }
-      }
-    } else {
-      items(filteredNotes, key = { it.id }) { note ->
-        ClinicalDocumentCard(
-          note = note,
-          onOpen = { onOpenNote(note, false) },
-          onListenNow = { onOpenNote(note, true) },
-          onEdit = {
-            editingNote = note
-            showNoteEditor = true
-          },
-          onDelete = { onDeleteNote(note.id) },
-        )
-      }
+      item { Spacer(Modifier.height(76.dp)) }
     }
   }
 
@@ -418,7 +433,7 @@ fun LibraryScreen(
 }
 
 @Composable
-private fun ClinicalDocumentCard(
+private fun LibraryDocumentCard(
   note: ClinicalNoteEntity,
   onOpen: () -> Unit,
   onListenNow: () -> Unit,
@@ -452,6 +467,20 @@ private fun ClinicalDocumentCard(
                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
               )
             }
+            if (note.lastSentenceIndex > 0) {
+              Spacer(Modifier.width(6.dp))
+              Surface(
+                color = MaterialTheme.colorScheme.primaryContainer,
+                shape = RoundedCornerShape(8.dp),
+              ) {
+                Text(
+                  text = "Resume #${note.lastSentenceIndex + 1}",
+                  style = MaterialTheme.typography.labelSmall,
+                  color = MaterialTheme.colorScheme.onPrimaryContainer,
+                  modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp),
+                )
+              }
+            }
             if (note.isOcrExtracted) {
               Spacer(Modifier.width(6.dp))
               Surface(
@@ -466,12 +495,6 @@ private fun ClinicalDocumentCard(
                 )
               }
             }
-            Spacer(Modifier.width(6.dp))
-            Text(
-              text = note.languageTag.uppercase(),
-              style = MaterialTheme.typography.labelSmall,
-              color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
           }
           Spacer(Modifier.height(6.dp))
           Text(
@@ -482,14 +505,15 @@ private fun ClinicalDocumentCard(
           )
         }
 
+        Spacer(Modifier.width(8.dp))
         FilledTonalButton(
           onClick = onListenNow,
           contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
           modifier = Modifier.testTag("listen_note_${note.id}"),
         ) {
-          Icon(Icons.Rounded.PlayArrow, contentDescription = "Listen to note", modifier = Modifier.size(18.dp))
+          Icon(Icons.Rounded.PlayArrow, contentDescription = "Listen to document", modifier = Modifier.size(18.dp))
           Spacer(Modifier.width(4.dp))
-          Text("Listen")
+          Text(if (note.lastSentenceIndex > 0) "Resume" else "Listen")
         }
       }
 
@@ -502,21 +526,28 @@ private fun ClinicalDocumentCard(
         overflow = TextOverflow.Ellipsis,
       )
 
-      Spacer(Modifier.height(8.dp))
+      Spacer(Modifier.height(6.dp))
       Row(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.End,
+        horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
       ) {
-        IconButton(onClick = onEdit, modifier = Modifier.minimumInteractiveComponentSize()) {
-          Icon(Icons.Rounded.Edit, contentDescription = "Edit clinical note", modifier = Modifier.size(18.dp))
-        }
-        IconButton(onClick = onDelete, modifier = Modifier.minimumInteractiveComponentSize()) {
-          Icon(
-            Icons.Rounded.DeleteOutline,
-            contentDescription = "Delete clinical note",
-            modifier = Modifier.size(18.dp),
-          )
+        Text(
+          text = "Language: ${note.languageTag.uppercase()}",
+          style = MaterialTheme.typography.labelSmall,
+          color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+          IconButton(onClick = onEdit, modifier = Modifier.minimumInteractiveComponentSize()) {
+            Icon(Icons.Rounded.Edit, contentDescription = "Edit document", modifier = Modifier.size(18.dp))
+          }
+          IconButton(onClick = onDelete, modifier = Modifier.minimumInteractiveComponentSize()) {
+            Icon(
+              Icons.Rounded.DeleteOutline,
+              contentDescription = "Delete document",
+              modifier = Modifier.size(18.dp),
+            )
+          }
         }
       }
     }
@@ -530,13 +561,13 @@ private fun NoteEditorDialog(
   onSave: (String, String, String, String) -> Unit,
 ) {
   var title by remember { mutableStateOf(initialNote?.title ?: "") }
-  var category by remember { mutableStateOf(initialNote?.category ?: "Clinical Note") }
+  var category by remember { mutableStateOf(initialNote?.category ?: "Book / Article") }
   var languageTag by remember { mutableStateOf(initialNote?.languageTag ?: "auto") }
   var content by remember { mutableStateOf(initialNote?.content ?: "") }
 
   AlertDialog(
     onDismissRequest = onDismiss,
-    title = { Text(if (initialNote == null) "New Clinical Note" else "Edit Clinical Note") },
+    title = { Text(if (initialNote == null) "Add Bilingual Text" else "Edit Document") },
     text = {
       Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         OutlinedTextField(
@@ -570,7 +601,7 @@ private fun NoteEditorDialog(
         OutlinedTextField(
           value = content,
           onValueChange = { content = it },
-          label = { Text("Clinical Note Text (Arabic, English, or Mixed)") },
+          label = { Text("Text (Arabic, English, or Mixed)") },
           minLines = 5,
           maxLines = 9,
           modifier = Modifier.fillMaxWidth().testTag("note_content_input"),
@@ -595,7 +626,7 @@ private fun QuickPasteReaderDialog(
   onDismiss: () -> Unit,
   onRead: (String, String) -> Unit,
 ) {
-  var title by remember { mutableStateOf("Quick Selection") }
+  var title by remember { mutableStateOf("Quick Reading") }
   var text by remember { mutableStateOf("") }
 
   AlertDialog(
@@ -613,7 +644,7 @@ private fun QuickPasteReaderDialog(
         OutlinedTextField(
           value = text,
           onValueChange = { text = it },
-          label = { Text("Paste text in Arabic, English, French, German, Spanish, etc.") },
+          label = { Text("Paste text in Arabic, English, or other languages") },
           minLines = 5,
           maxLines = 10,
           modifier = Modifier.fillMaxWidth().testTag("quick_paste_text_input"),

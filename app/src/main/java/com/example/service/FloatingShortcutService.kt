@@ -30,12 +30,15 @@ import android.widget.Toast
 import com.example.ClinNoteApplication
 import com.example.MainActivity
 import com.example.R
+import com.example.ai.AiCallResult
 import com.example.capture.AccessibilityCaptureResult
 import com.example.capture.ClinNoteAccessibilityService
 import com.example.model.PlaybackStatus
 import com.example.model.ReaderSessionState
 import com.example.model.ReaderSettings
 import com.example.model.SupportedLanguages
+import com.example.model.TranslationTone
+import com.example.nlp.LanguageDetector
 import kotlin.math.abs
 import kotlin.math.roundToInt
 import kotlinx.coroutines.CoroutineScope
@@ -46,14 +49,16 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
 /**
- * Persistent movable floating shortcut + expandable system-wide mini-player overlay.
+ * Persistent movable floating LinguaFloat button + icon-only compact floating toolbar overlay.
  *
- * Gestures on the floating button:
- * - Drag: move anywhere on screen and snap cleanly to nearest screen edge.
- * - Single tap: activate reading mode (captures selected/visible text via AccessibilityService if
- *   enabled, or toggles the compact floating mini-player with capture hints).
- * - Double tap (configurable): start/pause reading immediately.
- * - Long press: open ClinNote Reader Settings directly.
+ * Toolbar actions (icon-only with accessibility labels & tooltips):
+ * 1. Read selected/captured text aloud (Play/Pause)
+ * 2. Translate selected text inline (Arabic <-> English via Firebase AI Logic)
+ * 3. Listen to slow pronunciation (0.75x)
+ * 4. Practice speaking (deep-links to Speak Mode)
+ * 5. Correct pronunciation & accent (deep-links to Accent Coach)
+ * 6. Open full LinguaFloat workspace
+ * Plus Minimize/Collapse and Hide Shortcut controls.
  */
 class FloatingShortcutService : Service() {
 
@@ -62,20 +67,20 @@ class FloatingShortcutService : Service() {
   private lateinit var windowManager: WindowManager
   private var bubbleView: FrameLayout? = null
   private var bubbleBg: GradientDrawable? = null
-  private var bubbleIcon: ImageView? = null
   private var bubblePulseAnimator: ObjectAnimator? = null
   private var bubbleParams: WindowManager.LayoutParams? = null
 
-  private var miniPlayerView: LinearLayout? = null
-  private var miniPlayerParams: WindowManager.LayoutParams? = null
+  private var toolbarView: LinearLayout? = null
   private var titleView: TextView? = null
   private var langBadgeView: TextView? = null
   private var sentenceView: TextView? = null
+  private var translationBoxView: TextView? = null
   private var speedBtn: TextView? = null
-  private var playPauseBtn: ImageButton? = null
+  private var readActionBtn: ImageButton? = null
 
   private var currentSettings = ReaderSettings()
-  private var isMiniPlayerExpanded = false
+  private var isToolbarExpanded = false
+  private var lastInlineTranslation: String? = null
 
   override fun onCreate() {
     super.onCreate()
@@ -92,7 +97,7 @@ class FloatingShortcutService : Service() {
     scope.launch {
       app.speechCoordinator.sessionState.collectLatest { state ->
         updateBubblePlaybackVisual(state.status)
-        updateMiniPlayerContent(state)
+        updateToolbarContent(state)
       }
     }
   }
@@ -112,7 +117,7 @@ class FloatingShortcutService : Service() {
       ACTION_EXPAND_MINI_PLAYER -> {
         if (Settings.canDrawOverlays(this)) {
           ensureBubbleShown()
-          showMiniPlayerOverlay()
+          showFloatingToolbarOverlay()
         }
       }
       else -> {
@@ -156,8 +161,8 @@ class FloatingShortcutService : Service() {
     val bg =
       GradientDrawable().apply {
         shape = GradientDrawable.OVAL
-        setColor(Color.parseColor("#0B4F5C"))
-        setStroke(dpToPx(2f), Color.parseColor("#5CD6C8"))
+        setColor(Color.parseColor("#0A3D62"))
+        setStroke(dpToPx(2f), Color.parseColor("#4DD0E1"))
       }
     bubbleBg = bg
 
@@ -167,9 +172,8 @@ class FloatingShortcutService : Service() {
         setColorFilter(Color.WHITE)
         val pad = dpToPx(13f)
         setPadding(pad, pad, pad, pad)
-        contentDescription = "ClinNote floating smart reader shortcut"
+        contentDescription = "LinguaFloat floating language assistant"
       }
-    bubbleIcon = icon
 
     val container =
       FrameLayout(this).apply {
@@ -237,7 +241,7 @@ class FloatingShortcutService : Service() {
           }
 
           override fun onLongPress(e: MotionEvent) {
-            openSettingsScreen()
+            openAppTab(MainActivity.TAB_FLOATING_SETTINGS)
           }
         },
       )
@@ -287,7 +291,8 @@ class FloatingShortcutService : Service() {
       } else {
         (screenWidth - params.width - margin).coerceAtLeast(margin)
       }
-    val clampedY = params.y.coerceIn(dpToPx(48f), (screenHeight - params.height - dpToPx(72f)).coerceAtLeast(100))
+    val clampedY =
+      params.y.coerceIn(dpToPx(48f), (screenHeight - params.height - dpToPx(72f)).coerceAtLeast(100))
 
     ValueAnimator.ofInt(params.x, targetX).apply {
       duration = 180L
@@ -313,6 +318,7 @@ class FloatingShortcutService : Service() {
     if (accessibilityService != null) {
       when (val result = accessibilityService.captureOnUserRequest(packageName)) {
         is AccessibilityCaptureResult.Success -> {
+          lastInlineTranslation = null
           val title =
             result.text.lineSequence().firstOrNull { it.isNotBlank() }?.take(42)
               ?: "Captured Text"
@@ -320,14 +326,14 @@ class FloatingShortcutService : Service() {
             title = title,
             rawText = result.text,
             captureSource = result.source,
-            autoPlay = true,
+            autoPlay = false,
           )
-          showMiniPlayerOverlay()
+          showFloatingToolbarOverlay()
           return
         }
         is AccessibilityCaptureResult.Unavailable -> {
-          Toast.makeText(this, result.reason, Toast.LENGTH_LONG).show()
-          toggleMiniPlayerOverlay()
+          Toast.makeText(this, result.reason, Toast.LENGTH_SHORT).show()
+          toggleToolbarOverlay()
           return
         }
       }
@@ -335,46 +341,50 @@ class FloatingShortcutService : Service() {
       if (!app.speechCoordinator.sessionState.value.hasContent) {
         Toast.makeText(
             this,
-            "Enable ClinNote Accessibility in Settings to capture screen text, or select text and choose 'Read with ClinNote'.",
+            "Select text in any app & tap 'LinguaFloat', or enable Accessibility in Floating Settings.",
             Toast.LENGTH_LONG,
           )
           .show()
       }
-      toggleMiniPlayerOverlay()
+      toggleToolbarOverlay()
     }
   }
 
-  private fun toggleMiniPlayerOverlay() {
-    if (isMiniPlayerExpanded) {
-      hideMiniPlayerOverlay()
+  private fun toggleToolbarOverlay() {
+    if (isToolbarExpanded) {
+      hideToolbarOverlay()
     } else {
-      showMiniPlayerOverlay()
+      showFloatingToolbarOverlay()
     }
   }
 
-  private fun showMiniPlayerOverlay() {
-    if (miniPlayerView != null) return
-    val coordinator = ClinNoteApplication.instance.speechCoordinator
+  private fun showFloatingToolbarOverlay() {
+    if (toolbarView != null) {
+      updateToolbarContent(ClinNoteApplication.instance.speechCoordinator.sessionState.value)
+      return
+    }
+    val app = ClinNoteApplication.instance
+    val coordinator = app.speechCoordinator
     val state = coordinator.sessionState.value
 
     val panelBg =
       GradientDrawable().apply {
         shape = GradientDrawable.RECTANGLE
         cornerRadius = dpToPx(22f).toFloat()
-        setColor(Color.parseColor("#FA0E1E22"))
-        setStroke(dpToPx(1.5f), Color.parseColor("#3B8D86"))
+        setColor(Color.parseColor("#FA082032"))
+        setStroke(dpToPx(1.5f), Color.parseColor("#0E8A9E"))
       }
 
     val root =
       LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
         background = panelBg
-        elevation = dpToPx(12f).toFloat()
-        val pad = dpToPx(14f)
+        elevation = dpToPx(14f).toFloat()
+        val pad = dpToPx(12f)
         setPadding(pad, pad, pad, pad)
       }
 
-    // Header Row: Title + Language Pill + Open App + Close
+    // Header Row: Title + Language Pill + Speed + Minimize + Close Service
     val header =
       LinearLayout(this).apply {
         orientation = LinearLayout.HORIZONTAL
@@ -385,7 +395,7 @@ class FloatingShortcutService : Service() {
       TextView(this).apply {
         text = state.title
         setTextColor(Color.WHITE)
-        textSize = 14f
+        textSize = 13f
         setTypeface(typeface, Typeface.BOLD)
         maxLines = 1
         ellipsize = TextUtils.TruncateAt.END
@@ -399,105 +409,32 @@ class FloatingShortcutService : Service() {
         setTextColor(Color.parseColor("#8CF0E3"))
         textSize = 11f
         setTypeface(typeface, Typeface.BOLD)
-        val badgeBg =
+        background =
           GradientDrawable().apply {
-            cornerRadius = dpToPx(10f).toFloat()
-            setColor(Color.parseColor("#1B3F46"))
+            cornerRadius = dpToPx(8f).toFloat()
+            setColor(Color.parseColor("#133A54"))
           }
-        background = badgeBg
-        setPadding(dpToPx(8f), dpToPx(3f), dpToPx(8f), dpToPx(3f))
+        setPadding(dpToPx(7f), dpToPx(3f), dpToPx(7f), dpToPx(3f))
       }
     langBadgeView = tvLang
-
-    val openBtn =
-      ImageButton(this).apply {
-        setImageResource(android.R.drawable.ic_menu_view)
-        setColorFilter(Color.parseColor("#B6D5D1"))
-        background = null
-        contentDescription = "Open in ClinNote"
-        setPadding(dpToPx(8f), dpToPx(4f), dpToPx(4f), dpToPx(4f))
-        setOnClickListener {
-          hideMiniPlayerOverlay()
-          val intent =
-            Intent(this@FloatingShortcutService, MainActivity::class.java).apply {
-              addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
-              putExtra(MainActivity.EXTRA_OPEN_TAB, MainActivity.TAB_READER)
-            }
-          startActivity(intent)
-        }
-      }
-
-    val closeBtn =
-      ImageButton(this).apply {
-        setImageResource(android.R.drawable.ic_menu_close_clear_cancel)
-        setColorFilter(Color.parseColor("#B6D5D1"))
-        background = null
-        contentDescription = "Collapse mini-player"
-        setPadding(dpToPx(6f), dpToPx(4f), dpToPx(4f), dpToPx(4f))
-        setOnClickListener { hideMiniPlayerOverlay() }
-      }
-
-    header.addView(tvTitle)
-    header.addView(tvLang)
-    header.addView(openBtn)
-    header.addView(closeBtn)
-
-    // Current Sentence Highlight View
-    val tvSentence =
-      TextView(this).apply {
-        text =
-          state.currentSentence?.rawText
-            ?: "Select text in any app and tap 'Read with ClinNote', or tap the shortcut to capture visible text."
-        setTextColor(Color.parseColor("#E3F3F1"))
-        textSize = 13f
-        maxLines = 3
-        ellipsize = TextUtils.TruncateAt.END
-        setPadding(0, dpToPx(8f), 0, dpToPx(10f))
-      }
-    sentenceView = tvSentence
-
-    // Controls Row: Prev | Play/Pause | Next | Stop | Speed
-    val controls =
-      LinearLayout(this).apply {
-        orientation = LinearLayout.HORIZONTAL
-        gravity = Gravity.CENTER_VERTICAL
-      }
-
-    val prevBtn =
-      createOverlayControlButton(android.R.drawable.ic_media_previous, "Previous sentence") {
-        coordinator.previousSentence()
-      }
-
-    val playBtn =
-      createOverlayControlButton(android.R.drawable.ic_media_play, "Play or pause") {
-        coordinator.togglePlayPause()
-      }
-    playPauseBtn = playBtn
-
-    val nextBtn =
-      createOverlayControlButton(android.R.drawable.ic_media_next, "Next sentence") {
-        coordinator.nextSentence()
-      }
-
-    val stopBtn =
-      createOverlayControlButton(android.R.drawable.ic_delete, "Stop reading") {
-        coordinator.stop()
-      }
 
     val tvSpeed =
       TextView(this).apply {
         text = "${state.speechSpeed}x"
         setTextColor(Color.WHITE)
-        textSize = 13f
+        textSize = 11f
         setTypeface(typeface, Typeface.BOLD)
-        gravity = Gravity.CENTER
-        val speedBg =
+        background =
           GradientDrawable().apply {
-            cornerRadius = dpToPx(14f).toFloat()
-            setColor(Color.parseColor("#1D5B66"))
+            cornerRadius = dpToPx(8f).toFloat()
+            setColor(Color.parseColor("#0E8A9E"))
           }
-        background = speedBg
-        setPadding(dpToPx(12f), dpToPx(7f), dpToPx(12f), dpToPx(7f))
+        setPadding(dpToPx(8f), dpToPx(3f), dpToPx(8f), dpToPx(3f))
+        layoutParams =
+          LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.WRAP_CONTENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT,
+          ).apply { marginStart = dpToPx(6f) }
         setOnClickListener {
           val nextSpeed = coordinator.cycleSpeedPreset()
           text = "${nextSpeed}x"
@@ -505,21 +442,156 @@ class FloatingShortcutService : Service() {
       }
     speedBtn = tvSpeed
 
-    val spacer =
-      View(this).apply {
-        layoutParams = LinearLayout.LayoutParams(0, 1, 1f)
+    val minimizeBtn =
+      createHeaderIconBtn(android.R.drawable.arrow_down_float, "Minimize toolbar") {
+        hideToolbarOverlay()
       }
 
-    controls.addView(prevBtn)
-    controls.addView(playBtn)
-    controls.addView(nextBtn)
-    controls.addView(stopBtn)
-    controls.addView(spacer)
-    controls.addView(tvSpeed)
+    val closeServiceBtn =
+      createHeaderIconBtn(android.R.drawable.ic_menu_close_clear_cancel, "Close floating assistant") {
+        scope.launch {
+          app.settingsStore.updateSettings { it.copy(floatingShortcutEnabled = false) }
+        }
+        removeAllOverlays()
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        stopSelf()
+      }
+
+    header.addView(tvTitle)
+    header.addView(tvLang)
+    header.addView(tvSpeed)
+    header.addView(minimizeBtn)
+    header.addView(closeServiceBtn)
+
+    // Captured / active sentence preview
+    val tvSentence =
+      TextView(this).apply {
+        text =
+          state.currentSentence?.rawText
+            ?: "Select text in any app and tap 'LinguaFloat', or tap the bubble to capture text."
+        setTextColor(Color.parseColor("#E3F3F1"))
+        textSize = 13f
+        maxLines = 3
+        ellipsize = TextUtils.TruncateAt.END
+        setPadding(0, dpToPx(8f), 0, dpToPx(6f))
+      }
+    sentenceView = tvSentence
+
+    // Inline translation output box (visible when user taps Translate)
+    val tvTranslation =
+      TextView(this).apply {
+        visibility = View.GONE
+        setTextColor(Color.parseColor("#B2EBF2"))
+        textSize = 12.5f
+        maxLines = 4
+        ellipsize = TextUtils.TruncateAt.END
+        background =
+          GradientDrawable().apply {
+            cornerRadius = dpToPx(10f).toFloat()
+            setColor(Color.parseColor("#103047"))
+          }
+        setPadding(dpToPx(10f), dpToPx(8f), dpToPx(10f), dpToPx(8f))
+        layoutParams =
+          LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT,
+          ).apply { bottomMargin = dpToPx(8f) }
+      }
+    translationBoxView = tvTranslation
+
+    // 6-Action Icon-Only Floating Toolbar (with tooltips + contentDescriptions)
+    val toolbarRow =
+      LinearLayout(this).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER
+      }
+
+    // 1. Read selected text aloud
+    val readBtn =
+      createToolbarIconButton(
+        iconRes = R.drawable.ic_tb_read,
+        tooltip = "Read aloud",
+        accentHex = "#0E8A9E",
+      ) {
+        coordinator.togglePlayPause()
+      }
+    readActionBtn = readBtn
+
+    // 2. Translate selected text inline
+    val translateBtn =
+      createToolbarIconButton(
+        iconRes = R.drawable.ic_tb_translate,
+        tooltip = "Translate text",
+        accentHex = "#145374",
+      ) {
+        translateActiveSentenceInline()
+      }
+
+    // 3. Listen to slow clear pronunciation (0.75x)
+    val pronounceBtn =
+      createToolbarIconButton(
+        iconRes = R.drawable.ic_tb_pronounce,
+        tooltip = "Listen to pronunciation (0.75x)",
+        accentHex = "#145374",
+      ) {
+        val currentText = coordinator.sessionState.value.currentSentence?.rawText
+        if (currentText.isNullOrBlank()) {
+          Toast.makeText(this, "Capture or select text first", Toast.LENGTH_SHORT).show()
+        } else {
+          coordinator.speakOneShot(
+            text = currentText,
+            languageTag = coordinator.sessionState.value.activeLanguageTag,
+            speed = 0.75f,
+          )
+        }
+      }
+
+    // 4. Practice speaking
+    val speakBtn =
+      createToolbarIconButton(
+        iconRes = R.drawable.ic_tb_speak,
+        tooltip = "Practice speaking",
+        accentHex = "#145374",
+      ) {
+        val text = coordinator.sessionState.value.currentSentence?.rawText.orEmpty()
+        hideToolbarOverlay()
+        openAppTab(MainActivity.TAB_COACH, text)
+      }
+
+    // 5. Correct pronunciation and accent
+    val accentBtn =
+      createToolbarIconButton(
+        iconRes = R.drawable.ic_tb_accent,
+        tooltip = "Correct accent & pronunciation",
+        accentHex = "#D95F39",
+      ) {
+        val text = coordinator.sessionState.value.currentSentence?.rawText.orEmpty()
+        hideToolbarOverlay()
+        openAppTab(MainActivity.TAB_COACH, text)
+      }
+
+    // 6. Open full LinguaFloat assistant
+    val openAppBtn =
+      createToolbarIconButton(
+        iconRes = R.drawable.ic_tb_open_app,
+        tooltip = "Open LinguaFloat",
+        accentHex = "#1A4D6E",
+      ) {
+        hideToolbarOverlay()
+        openAppTab(MainActivity.TAB_READER)
+      }
+
+    toolbarRow.addView(readBtn)
+    toolbarRow.addView(translateBtn)
+    toolbarRow.addView(pronounceBtn)
+    toolbarRow.addView(speakBtn)
+    toolbarRow.addView(accentBtn)
+    toolbarRow.addView(openAppBtn)
 
     root.addView(header)
     root.addView(tvSentence)
-    root.addView(controls)
+    root.addView(tvTranslation)
+    root.addView(toolbarRow)
 
     val widthPx = (resources.displayMetrics.widthPixels - dpToPx(24f)).coerceAtMost(dpToPx(420f))
     val params =
@@ -532,47 +604,114 @@ class FloatingShortcutService : Service() {
         )
         .apply {
           gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
-          y = dpToPx(84f)
+          y = dpToPx(76f)
         }
 
-    miniPlayerView = root
-    miniPlayerParams = params
-    isMiniPlayerExpanded = true
+    toolbarView = root
+    isToolbarExpanded = true
     runCatching { windowManager.addView(root, params) }
-    updateMiniPlayerContent(state)
+    updateToolbarContent(state)
   }
 
-  private fun createOverlayControlButton(
-    iconRes: Int,
-    desc: String,
-    onClick: () -> Unit,
-  ): ImageButton {
-    val size = dpToPx(44f)
+  private fun translateActiveSentenceInline() {
+    val app = ClinNoteApplication.instance
+    val state = app.speechCoordinator.sessionState.value
+    val sentence = state.currentSentence?.rawText?.takeIf { it.isNotBlank() }
+    if (sentence == null) {
+      Toast.makeText(this, "No text loaded to translate yet.", Toast.LENGTH_SHORT).show()
+      return
+    }
+
+    val detectedSource = LanguageDetector.detectLanguage(sentence)
+    val targetLang = if (detectedSource.startsWith("ar", true)) "en-US" else "ar"
+
+    translationBoxView?.apply {
+      visibility = View.VISIBLE
+      text = "Translating ($detectedSource → $targetLang)..."
+    }
+
+    scope.launch {
+      when (
+        val res =
+          app.linguaAiService.translateWithContext(
+            text = sentence,
+            sourceLangHint = detectedSource,
+            targetLang = targetLang,
+            tone = TranslationTone.NATURAL,
+          )
+      ) {
+        is AiCallResult.Success -> {
+          lastInlineTranslation = res.data.translatedText
+          translationBoxView?.apply {
+            visibility = View.VISIBLE
+            text = "${res.data.translatedText}\n(${res.data.literalVsContextualNote})"
+            textDirection =
+              if (targetLang.startsWith("ar", true)) View.TEXT_DIRECTION_RTL else View.TEXT_DIRECTION_LTR
+          }
+          app.speechCoordinator.speakOneShot(res.data.translatedText, targetLang)
+        }
+        is AiCallResult.Error -> {
+          translationBoxView?.apply {
+            visibility = View.VISIBLE
+            text = "Translation unavailable: ${res.message}"
+          }
+        }
+      }
+    }
+  }
+
+  private fun createHeaderIconBtn(iconRes: Int, desc: String, onClick: () -> Unit): ImageButton {
     return ImageButton(this).apply {
       setImageResource(iconRes)
-      setColorFilter(Color.WHITE)
-      val btnBg =
-        GradientDrawable().apply {
-          shape = GradientDrawable.OVAL
-          setColor(Color.parseColor("#183E46"))
-        }
-      background = btnBg
+      setColorFilter(Color.parseColor("#B2D8E6"))
+      background = null
       contentDescription = desc
-      layoutParams =
-        LinearLayout.LayoutParams(size, size).apply { marginEnd = dpToPx(8f) }
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        tooltipText = desc
+      }
+      setPadding(dpToPx(7f), dpToPx(4f), dpToPx(4f), dpToPx(4f))
       setOnClickListener { onClick() }
     }
   }
 
-  private fun hideMiniPlayerOverlay() {
-    miniPlayerView?.let { runCatching { windowManager.removeView(it) } }
-    miniPlayerView = null
-    miniPlayerParams = null
-    isMiniPlayerExpanded = false
+  private fun createToolbarIconButton(
+    iconRes: Int,
+    tooltip: String,
+    accentHex: String,
+    onClick: () -> Unit,
+  ): ImageButton {
+    val size = dpToPx(46f)
+    return ImageButton(this).apply {
+      setImageResource(iconRes)
+      setColorFilter(Color.WHITE)
+      background =
+        GradientDrawable().apply {
+          shape = GradientDrawable.OVAL
+          setColor(Color.parseColor(accentHex))
+        }
+      contentDescription = tooltip
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        tooltipText = tooltip
+      }
+      val pad = dpToPx(11f)
+      setPadding(pad, pad, pad, pad)
+      layoutParams =
+        LinearLayout.LayoutParams(size, size).apply {
+          marginStart = dpToPx(4f)
+          marginEnd = dpToPx(4f)
+        }
+      setOnClickListener { onClick() }
+    }
+  }
+
+  private fun hideToolbarOverlay() {
+    toolbarView?.let { runCatching { windowManager.removeView(it) } }
+    toolbarView = null
+    isToolbarExpanded = false
   }
 
   private fun removeAllOverlays() {
-    hideMiniPlayerOverlay()
+    hideToolbarOverlay()
     bubblePulseAnimator?.cancel()
     bubbleView?.let { runCatching { windowManager.removeView(it) } }
     bubbleView = null
@@ -594,7 +733,7 @@ class FloatingShortcutService : Service() {
     val view = bubbleView ?: return
     when (status) {
       PlaybackStatus.PLAYING, PlaybackStatus.PREPARING -> {
-        bg.setColor(Color.parseColor("#1D7A72"))
+        bg.setColor(Color.parseColor("#0E8A9E"))
         bg.setStroke(dpToPx(2.5f), Color.parseColor("#FF9E6D"))
         if (bubblePulseAnimator == null) {
           bubblePulseAnimator =
@@ -606,15 +745,15 @@ class FloatingShortcutService : Service() {
         }
       }
       PlaybackStatus.PAUSED -> {
-        bg.setColor(Color.parseColor("#B05B3B"))
+        bg.setColor(Color.parseColor("#D95F39"))
         bg.setStroke(dpToPx(2f), Color.parseColor("#FFD1B8"))
         bubblePulseAnimator?.cancel()
         bubblePulseAnimator = null
         view.scaleX = 1f
       }
       else -> {
-        bg.setColor(Color.parseColor("#0B4F5C"))
-        bg.setStroke(dpToPx(2f), Color.parseColor("#5CD6C8"))
+        bg.setColor(Color.parseColor("#0A3D62"))
+        bg.setStroke(dpToPx(2f), Color.parseColor("#4DD0E1"))
         bubblePulseAnimator?.cancel()
         bubblePulseAnimator = null
         view.scaleX = 1f
@@ -622,15 +761,15 @@ class FloatingShortcutService : Service() {
     }
   }
 
-  private fun updateMiniPlayerContent(state: ReaderSessionState) {
-    if (!isMiniPlayerExpanded) return
+  private fun updateToolbarContent(state: ReaderSessionState) {
+    if (!isToolbarExpanded) return
     titleView?.text = state.title
     langBadgeView?.text = SupportedLanguages.findByTag(state.activeLanguageTag).tag.uppercase()
     speedBtn?.text = "${state.speechSpeed}x"
     sentenceView?.apply {
       text =
         state.currentSentence?.rawText
-          ?: "Ready. Select text in any app or tap the shortcut to capture screen text."
+          ?: "Ready. Select text in any app or tap the floating icon to capture text."
       textDirection =
         if (state.currentSentence?.isRtl == true || state.isRtlDocument) {
           View.TEXT_DIRECTION_RTL
@@ -639,16 +778,22 @@ class FloatingShortcutService : Service() {
         }
     }
     val isPlaying = state.status == PlaybackStatus.PLAYING || state.status == PlaybackStatus.PREPARING
-    playPauseBtn?.setImageResource(
-      if (isPlaying) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play
+    readActionBtn?.setImageResource(
+      if (isPlaying) android.R.drawable.ic_media_pause else R.drawable.ic_tb_read
     )
+    if (lastInlineTranslation == null) {
+      translationBoxView?.visibility = View.GONE
+    }
   }
 
-  private fun openSettingsScreen() {
+  private fun openAppTab(tab: String, actionText: String? = null) {
     val intent =
       Intent(this, MainActivity::class.java).apply {
         addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
-        putExtra(MainActivity.EXTRA_OPEN_TAB, MainActivity.TAB_SETTINGS)
+        putExtra(MainActivity.EXTRA_OPEN_TAB, tab)
+        if (!actionText.isNullOrBlank()) {
+          putExtra(MainActivity.EXTRA_ACTION_TEXT, actionText)
+        }
       }
     startActivity(intent)
   }
@@ -660,7 +805,7 @@ class FloatingShortcutService : Service() {
         20,
         Intent(this, MainActivity::class.java).apply {
           addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
-          putExtra(MainActivity.EXTRA_OPEN_TAB, MainActivity.TAB_SETTINGS)
+          putExtra(MainActivity.EXTRA_OPEN_TAB, MainActivity.TAB_FLOATING_SETTINGS)
         },
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
       )
@@ -683,8 +828,8 @@ class FloatingShortcutService : Service() {
 
     return builder
       .setSmallIcon(R.drawable.ic_floating_reader)
-      .setContentTitle("ClinNote Floating Shortcut Active")
-      .setContentText("Tap bubble to read • Long-press for settings")
+      .setContentTitle("LinguaFloat Assistant Active")
+      .setContentText("Tap bubble for Read, Translate & Accent Coach")
       .setContentIntent(openIntent)
       .setOngoing(true)
       .addAction(

@@ -1,9 +1,5 @@
 package com.example.ui.screens
 
-import android.Manifest
-import android.os.Build
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -20,13 +16,10 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.AccessibilityNew
-import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.Layers
-import androidx.compose.material.icons.rounded.NotificationsActive
 import androidx.compose.material.icons.rounded.PrivacyTip
-import androidx.compose.material.icons.rounded.RestartAlt
-import androidx.compose.material.icons.rounded.WarningAmber
+import androidx.compose.material.icons.rounded.Translate
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -38,205 +31,114 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
-import androidx.lifecycle.compose.LocalLifecycleOwner
-import com.example.capture.SystemIntegrationHelper
 import com.example.model.PLAYBACK_SPEED_PRESETS
 import com.example.model.ReaderSettings
 import com.example.model.SupportedLanguages
+import com.example.model.VoiceGender
 import kotlin.math.roundToInt
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun SettingsScreen(
   settings: ReaderSettings,
-  onToggleFloatingShortcut: (Boolean) -> Unit,
-  onUpdateButtonSize: (Float) -> Unit,
-  onUpdateButtonAlpha: (Float) -> Unit,
-  onResetButtonPosition: () -> Unit,
-  onSetDoubleTapToggle: (Boolean) -> Unit,
+  onOpenFloatingSettings: () -> Unit,
+  onOpenVoicesStudio: () -> Unit,
   onSetDefaultLanguage: (String) -> Unit,
+  onSetEnglishAccent: (String) -> Unit,
+  onSetGenderFilter: (VoiceGender) -> Unit,
   onSetAutoDetect: (Boolean) -> Unit,
   onSetMixedArabicEnglish: (Boolean) -> Unit,
   onSetSpeed: (Float) -> Unit,
   onSetPitch: (Float) -> Unit,
+  onSetVolume: (Float) -> Unit,
   onToggleSkipHeadings: () -> Unit,
+  onSetOnlineAiEnabled: (Boolean) -> Unit,
   onSetReadingHistoryEnabled: (Boolean) -> Unit,
+  onSetSaveVoiceRecordingsConsent: (Boolean) -> Unit,
   onClearHistory: () -> Unit,
+  onClearTranslations: () -> Unit,
+  onClearVoiceData: () -> Unit,
   modifier: Modifier = Modifier,
 ) {
-  val context = LocalContext.current
-  val lifecycleOwner = LocalLifecycleOwner.current
-
-  var canOverlay by remember { mutableStateOf(SystemIntegrationHelper.canDrawOverlays(context)) }
-  var accessibilityEnabled by remember {
-    mutableStateOf(SystemIntegrationHelper.isAccessibilityServiceEnabled(context))
-  }
-  var notificationsAllowed by remember {
-    mutableStateOf(SystemIntegrationHelper.hasNotificationPermission(context))
-  }
-
-  DisposableEffect(lifecycleOwner) {
-    val observer = LifecycleEventObserver { _, event ->
-      if (event == Lifecycle.Event.ON_RESUME) {
-        canOverlay = SystemIntegrationHelper.canDrawOverlays(context)
-        accessibilityEnabled = SystemIntegrationHelper.isAccessibilityServiceEnabled(context)
-        notificationsAllowed = SystemIntegrationHelper.hasNotificationPermission(context)
-      }
-    }
-    lifecycleOwner.lifecycle.addObserver(observer)
-    onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
-  }
-
-  val notificationLauncher =
-    rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-      notificationsAllowed = granted
-    }
+  val selectedGender =
+    runCatching { VoiceGender.valueOf(settings.preferredGender) }.getOrDefault(VoiceGender.ANY)
 
   LazyColumn(
     modifier = modifier.fillMaxSize(),
     contentPadding = PaddingValues(16.dp),
     verticalArrangement = Arrangement.spacedBy(14.dp),
   ) {
-    // Section 1: Universal Floating Shortcut & System Permissions
+    // 1. Floating Assistant & Voices Studio Quick Launchers
     item {
       Card(
         shape = RoundedCornerShape(18.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
       ) {
-        Column(
-          modifier = Modifier.fillMaxWidth().padding(16.dp),
-          verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-          Text("Universal Floating Shortcut", style = MaterialTheme.typography.titleMedium)
-
-          Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-          ) {
-            Column(modifier = Modifier.weight(1f)) {
-              Text("Floating Reader Button", style = MaterialTheme.typography.bodyLarge)
-              Text(
-                "Tap to read • Double-tap to play/pause • Long-press for settings",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-              )
+        Column(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+          Text("System & Voice Configuration", style = MaterialTheme.typography.titleMedium)
+          Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(
+              onClick = onOpenFloatingSettings,
+              modifier = Modifier.weight(1f).testTag("settings_open_floating"),
+            ) {
+              Icon(Icons.Rounded.Layers, contentDescription = null, modifier = Modifier.size(18.dp))
+              Spacer(Modifier.width(6.dp))
+              Text("Floating Setup")
             }
-            Switch(
-              checked = settings.floatingShortcutEnabled && canOverlay,
-              onCheckedChange = onToggleFloatingShortcut,
-              modifier = Modifier.testTag("settings_floating_switch"),
-            )
-          }
-
-          PermissionStatusRow(
-            icon = Icons.Rounded.Layers,
-            title = "Display Over Other Apps",
-            subtitle =
-              if (canOverlay) "Overlay permission granted"
-              else "Required to show floating shortcut across Chrome & PDF apps",
-            granted = canOverlay,
-            actionLabel = if (canOverlay) "Settings" else "Grant",
-            onAction = { SystemIntegrationHelper.openOverlayPermissionSettings(context) },
-          )
-
-          PermissionStatusRow(
-            icon = Icons.Rounded.AccessibilityNew,
-            title = "ClinNote Accessibility Capture",
-            subtitle =
-              if (accessibilityEnabled) "Active (captures only on explicit tap)"
-              else "Optional: enables reading selected/visible text in browsers & apps",
-            granted = accessibilityEnabled,
-            actionLabel = if (accessibilityEnabled) "Manage" else "Enable",
-            onAction = { SystemIntegrationHelper.openAccessibilitySettings(context) },
-          )
-
-          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            PermissionStatusRow(
-              icon = Icons.Rounded.NotificationsActive,
-              title = "Playback & Shortcut Notifications",
-              subtitle =
-                if (notificationsAllowed) "Granted for lock-screen & background controls"
-                else "Allows persistent media controls & easy shutdown",
-              granted = notificationsAllowed,
-              actionLabel = if (notificationsAllowed) "Granted" else "Allow",
-              onAction = {
-                if (!notificationsAllowed) {
-                  notificationLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-                }
-              },
-            )
-          }
-
-          // Size & Transparency
-          Column {
-            Text(
-              "Button Size: ${settings.floatingButtonSizeDp.roundToInt()} dp",
-              style = MaterialTheme.typography.labelLarge,
-            )
-            Slider(
-              value = settings.floatingButtonSizeDp,
-              onValueChange = onUpdateButtonSize,
-              valueRange = 44f..72f,
-            )
-          }
-
-          Column {
-            Text(
-              "Button Opacity: ${(settings.floatingButtonAlpha * 100).roundToInt()}%",
-              style = MaterialTheme.typography.labelLarge,
-            )
-            Slider(
-              value = settings.floatingButtonAlpha,
-              onValueChange = onUpdateButtonAlpha,
-              valueRange = 0.35f..1.0f,
-            )
-          }
-
-          Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-          ) {
-            Text("Double-tap button to Play/Pause", style = MaterialTheme.typography.bodyMedium)
-            Switch(
-              checked = settings.doubleTapToTogglePlay,
-              onCheckedChange = onSetDoubleTapToggle,
-            )
-          }
-
-          OutlinedButton(onClick = onResetButtonPosition) {
-            Icon(Icons.Rounded.RestartAlt, contentDescription = null, modifier = Modifier.size(18.dp))
-            Spacer(Modifier.width(6.dp))
-            Text("Reset Floating Button Position")
+            OutlinedButton(
+              onClick = onOpenVoicesStudio,
+              modifier = Modifier.weight(1f).testTag("settings_open_studio"),
+            ) {
+              Icon(Icons.Rounded.GraphicEq, contentDescription = null, modifier = Modifier.size(18.dp))
+              Spacer(Modifier.width(6.dp))
+              Text("Voices & Rules")
+            }
           }
         }
       }
     }
 
-    // Section 2: Speech, Speed, Pitch & Language Intelligence
+    // 2. Language, Accent & Voice Preferences
     item {
       Card(
         shape = RoundedCornerShape(18.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
       ) {
-        Column(
-          modifier = Modifier.fillMaxWidth().padding(16.dp),
-          verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-          Text("Speech & Language Intelligence", style = MaterialTheme.typography.titleMedium)
+        Column(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+          Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Rounded.Translate, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+            Spacer(Modifier.width(8.dp))
+            Text("Language & Pronunciation Preferences", style = MaterialTheme.typography.titleMedium)
+          }
+
+          Text("Preferred English Accent", style = MaterialTheme.typography.labelLarge)
+          Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FilterChip(
+              selected = settings.englishAccentTag == "en-US",
+              onClick = { onSetEnglishAccent("en-US") },
+              label = { Text("American (en-US)") },
+            )
+            FilterChip(
+              selected = settings.englishAccentTag == "en-GB",
+              onClick = { onSetEnglishAccent("en-GB") },
+              label = { Text("British (en-GB)") },
+            )
+          }
+
+          Text("Voice Gender Preference", style = MaterialTheme.typography.labelLarge)
+          Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            VoiceGender.entries.forEach { gender ->
+              FilterChip(
+                selected = selectedGender == gender,
+                onClick = { onSetGenderFilter(gender) },
+                label = { Text(gender.label) },
+              )
+            }
+          }
 
           Row(
             modifier = Modifier.fillMaxWidth(),
@@ -246,8 +148,8 @@ fun SettingsScreen(
             Column(modifier = Modifier.weight(1f)) {
               Text("Auto-Detect Language", style = MaterialTheme.typography.bodyLarge)
               Text(
-                "Automatically selects Arabic, English, French, German, Spanish & more",
-                style = MaterialTheme.typography.bodyMedium,
+                "Automatically switches between Arabic, English & supported languages",
+                style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
               )
             }
@@ -260,10 +162,10 @@ fun SettingsScreen(
             verticalAlignment = Alignment.CenterVertically,
           ) {
             Column(modifier = Modifier.weight(1f)) {
-              Text("Mixed Arabic-English Voice Switching", style = MaterialTheme.typography.bodyLarge)
+              Text("Mixed Arabic-English Switching", style = MaterialTheme.typography.bodyLarge)
               Text(
-                "Switches smoothly mid-sentence for bilingual medical terms",
-                style = MaterialTheme.typography.bodyMedium,
+                "Switches voice smoothly mid-sentence for bilingual texts",
+                style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
               )
             }
@@ -281,8 +183,8 @@ fun SettingsScreen(
             Column(modifier = Modifier.weight(1f)) {
               Text("Skip Headings & References", style = MaterialTheme.typography.bodyLarge)
               Text(
-                "Skips section headers and numbered bibliographic citations",
-                style = MaterialTheme.typography.bodyMedium,
+                "Skips section headers and citation numbers when reading books",
+                style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
               )
             }
@@ -302,7 +204,7 @@ fun SettingsScreen(
               onClick = { onSetDefaultLanguage("auto") },
               label = { Text("Auto") },
             )
-            SupportedLanguages.ALL.take(7).forEach { lang ->
+            SupportedLanguages.ALL.take(6).forEach { lang ->
               FilterChip(
                 selected = settings.defaultLanguageTag == lang.tag,
                 onClick = { onSetDefaultLanguage(lang.tag) },
@@ -336,32 +238,40 @@ fun SettingsScreen(
               valueRange = 0.65f..1.45f,
             )
           }
+
+          Column {
+            Text(
+              "Speech Volume: ${(settings.speechVolume * 100).roundToInt()}%",
+              style = MaterialTheme.typography.labelLarge,
+            )
+            Slider(
+              value = settings.speechVolume,
+              onValueChange = onSetVolume,
+              valueRange = 0.1f..1.0f,
+            )
+          }
         }
       }
     }
 
-    // Section 3: Privacy & Security Controls
+    // 3. Privacy, Voice Data & Offline vs Online AI Transparency
     item {
       Card(
         shape = RoundedCornerShape(18.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
       ) {
-        Column(
-          modifier = Modifier.fillMaxWidth().padding(16.dp),
-          verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
+        Column(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
           Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(Icons.Rounded.PrivacyTip, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
             Spacer(Modifier.width(8.dp))
-            Text("Privacy & Capture Safeguards", style = MaterialTheme.typography.titleMedium)
+            Text("Privacy & AI Transparency", style = MaterialTheme.typography.titleMedium)
           }
 
           Text(
-            "• Zero background screen recording or keystroke logging.\n" +
-              "• Password fields and secure Android windows are strictly ignored.\n" +
-              "• Selected text stays on-device unless you explicitly configure a Cloud TTS backend.\n" +
-              "• No microphone permission required or requested.",
-            style = MaterialTheme.typography.bodyMedium,
+            "• Offline Features: Text-to-Speech reading, PDF/EPUB/TXT parsing, Latin OCR, pronunciation rules, and on-device SpeechRecognizer word match.\n" +
+              "• Online AI (Firebase AI Logic / Gemini): Contextual translation, idiom/passage explanation, Arabic Vision OCR fallback, and multimodal pronunciation coaching.\n" +
+              "• Security: Password fields and secure windows are strictly ignored; audio recordings are deleted right after analysis unless you opt in below.",
+            style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
           )
 
@@ -371,10 +281,45 @@ fun SettingsScreen(
             verticalAlignment = Alignment.CenterVertically,
           ) {
             Column(modifier = Modifier.weight(1f)) {
+              Text("Enable Online Gemini AI Coaching", style = MaterialTheme.typography.bodyLarge)
+              Text(
+                "Disable for strictly offline TTS + on-device ASR mode",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+              )
+            }
+            Switch(checked = settings.onlineAiEnabled, onCheckedChange = onSetOnlineAiEnabled)
+          }
+
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+          ) {
+            Column(modifier = Modifier.weight(1f)) {
+              Text("Save Voice Recordings Locally", style = MaterialTheme.typography.bodyLarge)
+              Text(
+                "Opt-in to keep audio clips for replay in Progress history",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+              )
+            }
+            Switch(
+              checked = settings.saveVoiceRecordingsConsent,
+              onCheckedChange = onSetSaveVoiceRecordingsConsent,
+            )
+          }
+
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+          ) {
+            Column(modifier = Modifier.weight(1f)) {
               Text("Save Local Reading History", style = MaterialTheme.typography.bodyLarge)
               Text(
-                "Disable for strictly ephemeral reading sessions",
-                style = MaterialTheme.typography.bodyMedium,
+                "Disable for ephemeral reading sessions",
+                style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
               )
             }
@@ -384,57 +329,18 @@ fun SettingsScreen(
             )
           }
 
-          OutlinedButton(onClick = onClearHistory) { Text("Clear Reading History") }
+          FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+          ) {
+            OutlinedButton(onClick = onClearHistory) { Text("Clear Reading History") }
+            OutlinedButton(onClick = onClearTranslations) { Text("Clear Translations") }
+            OutlinedButton(onClick = onClearVoiceData) { Text("Delete Voice Data") }
+          }
         }
       }
     }
 
     item { Spacer(Modifier.height(80.dp)) }
-  }
-}
-
-@Composable
-private fun PermissionStatusRow(
-  icon: androidx.compose.ui.graphics.vector.ImageVector,
-  title: String,
-  subtitle: String,
-  granted: Boolean,
-  actionLabel: String,
-  onAction: () -> Unit,
-) {
-  Row(
-    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-    verticalAlignment = Alignment.CenterVertically,
-  ) {
-    Icon(
-      imageVector = icon,
-      contentDescription = null,
-      tint = MaterialTheme.colorScheme.primary,
-      modifier = Modifier.size(22.dp),
-    )
-    Spacer(Modifier.width(10.dp))
-    Column(modifier = Modifier.weight(1f)) {
-      Row(verticalAlignment = Alignment.CenterVertically) {
-        Text(title, style = MaterialTheme.typography.titleSmall)
-        Spacer(Modifier.width(6.dp))
-        Icon(
-          imageVector = if (granted) Icons.Rounded.CheckCircle else Icons.Rounded.WarningAmber,
-          contentDescription = if (granted) "Enabled" else "Action needed",
-          tint =
-            if (granted) MaterialTheme.colorScheme.secondary
-            else MaterialTheme.colorScheme.tertiary,
-          modifier = Modifier.size(15.dp),
-        )
-      }
-      Text(
-        text = subtitle,
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-      )
-    }
-    Spacer(Modifier.width(8.dp))
-    Button(onClick = onAction, contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)) {
-      Text(actionLabel)
-    }
   }
 }

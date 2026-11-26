@@ -8,6 +8,7 @@ import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import android.speech.tts.Voice
 import com.example.model.SpeechSegment
+import com.example.model.VoiceGender
 import com.example.model.VoiceInfoModel
 import com.example.model.VoiceQualityTier
 import java.util.Locale
@@ -109,6 +110,7 @@ class AndroidTtsSpeechProvider(private val context: Context) : SpeechProvider {
           languageCode = voice.locale.language,
           qualityTier = qualityTier,
           isOfflineAvailable = !voice.isNetworkConnectionRequired,
+          gender = inferVoiceGender(voice),
           isFavorite = favoriteIds.contains(voice.name),
           providerId = providerId,
         )
@@ -131,7 +133,9 @@ class AndroidTtsSpeechProvider(private val context: Context) : SpeechProvider {
           voice.locale.language.equals(targetLocale.language, ignoreCase = true)
       }
     if (hasOfflineVoice) return true
-    val avail = runCatching { engine.isLanguageAvailable(targetLocale) }.getOrDefault(TextToSpeech.LANG_NOT_SUPPORTED)
+    val avail =
+      runCatching { engine.isLanguageAvailable(targetLocale) }
+        .getOrDefault(TextToSpeech.LANG_NOT_SUPPORTED)
     return avail >= TextToSpeech.LANG_AVAILABLE
   }
 
@@ -141,6 +145,7 @@ class AndroidTtsSpeechProvider(private val context: Context) : SpeechProvider {
     preferredVoiceId: String?,
     speed: Float,
     pitch: Float,
+    volume: Float,
     pauseAfterMs: Long,
   ): Boolean {
     val engine = tts ?: return false
@@ -157,7 +162,11 @@ class AndroidTtsSpeechProvider(private val context: Context) : SpeechProvider {
       engine.language = targetLocale
     }
 
-    val params = Bundle().apply { putString(TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID, utteranceId) }
+    val params =
+      Bundle().apply {
+        putString(TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID, utteranceId)
+        putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, volume.coerceIn(0.1f, 1.0f))
+      }
     val spoken = segment.spokenText.ifBlank { segment.text }
     val code = engine.speak(spoken, TextToSpeech.QUEUE_FLUSH, params, utteranceId)
     if (code == TextToSpeech.SUCCESS && pauseAfterMs > 0L) {
@@ -243,16 +252,37 @@ class AndroidTtsSpeechProvider(private val context: Context) : SpeechProvider {
     }
   }
 
+  private fun inferVoiceGender(voice: Voice): VoiceGender {
+    val lower = voice.name.lowercase()
+    val features = voice.features?.joinToString(" ")?.lowercase().orEmpty()
+    val combined = "$lower $features"
+    return when {
+      combined.contains("female") ||
+        Regex("""[-_](sfb|sfg|tpf|iob|wavenet-a|wavenet-c|wavenet-e|wavenet-f)\b""").containsMatchIn(lower) ->
+        VoiceGender.FEMALE
+      combined.contains("male") ||
+        Regex("""[-_](iom|stm|tpd|wavenet-b|wavenet-d)\b""").containsMatchIn(lower) ->
+        VoiceGender.MALE
+      else -> VoiceGender.ANY
+    }
+  }
+
   private fun buildFriendlyVoiceName(voice: Voice): String {
     val lang = voice.locale.getDisplayLanguage(Locale.ENGLISH).ifBlank { voice.locale.language }
     val country = voice.locale.country
     val region = if (country.isNotBlank()) " ($country)" else ""
     val shortCode = voice.name.substringAfterLast('-').take(14)
     val offlineTag = if (voice.isNetworkConnectionRequired) "Network" else "Offline"
-    return "$lang$region · $shortCode [$offlineTag]"
+    val genderTag =
+      when (inferVoiceGender(voice)) {
+        VoiceGender.FEMALE -> " · F"
+        VoiceGender.MALE -> " · M"
+        VoiceGender.ANY -> ""
+      }
+    return "$lang$region · $shortCode$genderTag [$offlineTag]"
   }
 
   companion object {
-    private const val SILENCE_PREFIX = "clinnote_pause_"
+    private const val SILENCE_PREFIX = "lingua_pause_"
   }
 }
